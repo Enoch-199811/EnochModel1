@@ -30,7 +30,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from enochmodel1._paths import PROJECT_ROOT  # noqa: E402
 from enochmodel1.enoch import (  # noqa: E402
-    CharTokenizer,
     build_lm_batch,
     evaluate,
     generate_text,
@@ -98,8 +97,9 @@ def main() -> None:
         ev = evaluate(model, tokenizer, np.random.default_rng(0), ev_args,
                       n=args.eval_n)
         rng = np.random.default_rng(7)
+        # 词表是每个 checkpoint 自己一份, prompt 里可能有该模型没见过的字
         samples = {p: generate_text(model, tokenizer, p, 24, 0.8, rng)
-                   for p in PROMPTS}
+                   for p in PROMPTS if all(c in tokenizer.stoi for c in p)}
         rows.append({
             "tag": tag or ckpt.name,
             "path": str(ckpt),

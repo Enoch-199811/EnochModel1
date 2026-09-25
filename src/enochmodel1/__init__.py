@@ -26,7 +26,8 @@ if not any(v in _os.environ for v in _BLAS_VARS):
         _os.environ.setdefault(_v, _threads)
 del _os, _BLAS_VARS
 
-from .enoch import (
+# 必须在设置好线程环境变量之后再导入 (E402 是有意为之)
+from .enoch import (  # noqa: E402
     Adam,
     CharTokenizer,
     KVCache,
