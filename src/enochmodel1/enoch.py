@@ -78,6 +78,21 @@ def atb(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 _CAUSAL_MASKS: dict[tuple[int, str], np.ndarray] = {}
 
 
+def banned_ngram_tokens(tokens: list[int], n: int) -> np.ndarray:
+    """重复惩罚：返回**会与已出现 n-gram 重复**的候选 token。
+
+    只 bans "以当前结尾 (n-1) 个 token 为前缀、且该 n-gram 已经出现过"的补全，
+    是标准 no-repeat-ngram 采样；``n <= 1`` 时不禁任何 token。
+    """
+    empty = np.empty(0, dtype=np.int64)
+    if n <= 1 or len(tokens) < n - 1:
+        return empty
+    prefix = tuple(tokens[-(n - 1):])
+    banned = {tokens[i + n - 1] for i in range(len(tokens) - n + 1)
+              if tuple(tokens[i:i + n - 1]) == prefix}
+    return np.array(sorted(banned), dtype=np.int64) if banned else empty
+
+
 def causal_mask(length: int, dtype: np.dtype) -> np.ndarray:
     """返回 [L, L] 的上三角 -inf 掩码 (只读复用, 调用方不得原地修改)。"""
     key = (length, np.dtype(dtype).str)
@@ -562,7 +577,9 @@ class TinyTransformer:
     def generate_batch(self, prompt_ids: list[int], group_size: int,
                        max_new: int, temperature: float,
                        rng: np.random.Generator,
-                       eos_id: int, max_pos: int) -> tuple[list[list[int]], list[list[float]]]:
+                       eos_id: int, max_pos: int,
+                       top_k: int = 0,
+                       no_repeat_ngram: int = 0) -> tuple[list[list[int]], list[list[float]]]:
         """对同一个 prompt 采样 group_size 条回答。
 
         返回 (回答序列列表[含 eos, 无 padding], 每步 logprob 列表)。
@@ -570,6 +587,10 @@ class TinyTransformer:
         实现是"预填充 + 增量解码": prompt 只前向一次并写入 :class:`KVCache`,
         之后每步只喂一个新 token。采样顺序 (逐行、每行一次 ``rng.choice``)
         与朴素全量前向完全一致, 因此同 seed 下输出可复现。
+
+        ``top_k > 0`` 只保留概率最高的 k 个 token; ``no_repeat_ngram > 1``
+        禁止重复出现过的 n-gram —— 实测这就是"不管问什么都续同一句模板"的解药。
+        两者默认 0 = 关闭, 行为与不带参数时**逐位一致**。
         """
         W = min(len(prompt_ids) + max_new, max_pos)
         seqs: list[list[int]] = [list(prompt_ids) for _ in range(group_size)]
@@ -591,11 +612,37 @@ class TinyTransformer:
                 if done[i]:
                     continue
                 if temperature <= 0.0:
-                    tok = int(np.argmax(row_logits[i]))
+                    if no_repeat_ngram > 1 or 0 < top_k < self.vocab_size:
+                        # 贪心同样受约束：把被禁/长尾 token 压到 -inf 再取 argmax
+                        masked = row_logits[i].copy()
+                        if no_repeat_ngram > 1:
+                            ban = banned_ngram_tokens(seqs[i], no_repeat_ngram)
+                            if ban.size:
+                                masked[ban] = -np.inf
+                        if 0 < top_k < self.vocab_size:
+                            keep = np.argpartition(row_logits[i], -top_k)[-top_k:]
+                            drop = np.ones_like(masked, dtype=bool)
+                            drop[keep] = False
+                            masked[drop] = -np.inf
+                        tok = int(np.argmax(masked))
+                    else:
+                        tok = int(np.argmax(row_logits[i]))
                     logprob_rows[i].append(0.0)
                 else:
                     p = softmax(row_logits[i] / temperature)
-                    p = p / p.sum()  # 归一化, 避免浮点误差
+                    if no_repeat_ngram > 1:
+                        ban = banned_ngram_tokens(seqs[i], no_repeat_ngram)
+                        if ban.size:
+                            p[ban] = 0.0
+                    if 0 < top_k < self.vocab_size:
+                        # 只留概率最高的 k 个（argpartition 是 O(V)，V 只有几百）
+                        cut = np.argpartition(p, -top_k)[:-top_k]
+                        p[cut] = 0.0
+                    total = float(p.sum())
+                    if not np.isfinite(total) or total <= 0.0:
+                        p = softmax(row_logits[i] / temperature)   # 兜底：退回未约束分布
+                        total = float(p.sum())
+                    p = p / total  # 归一化, 避免浮点误差
                     tok = int(rng.choice(self.vocab_size, p=p))
                     logprob_rows[i].append(float(np.log(max(p[tok], 1e-12))))
                 if len(seqs[i]) < capacity:
@@ -616,7 +663,8 @@ class TinyTransformer:
 
 def generate_text(model: TinyTransformer, tokenizer: CharTokenizer,
                   seed: str, max_new: int, temperature: float,
-                  rng: np.random.Generator) -> str:
+                  rng: np.random.Generator, top_k: int = 0,
+                  no_repeat_ngram: int = 0) -> str:
     """给一段种子文本, 贪心/采样续写并返回新生成的部分 (不含 eos)。"""
     prompt_ids = tokenizer.encode(seed)
     max_keep = max(model.max_pos - max_new, 1)
@@ -624,7 +672,8 @@ def generate_text(model: TinyTransformer, tokenizer: CharTokenizer,
         prompt_ids = prompt_ids[-max_keep:]
     seqs, _ = model.generate_batch(
         prompt_ids, 1, max_new, temperature, rng,
-        tokenizer.eos_id, model.max_pos)
+        tokenizer.eos_id, model.max_pos,
+        top_k=top_k, no_repeat_ngram=no_repeat_ngram)
     resp = seqs[0][len(prompt_ids):]
     return tokenizer.decode([t for t in resp if t != tokenizer.eos_id])
 

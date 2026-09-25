@@ -42,6 +42,9 @@ from enochmodel1.enoch import (  # noqa: E402
 )
 from enochmodel1.merge import val_perplexity  # noqa: E402
 
+# 解码约束（CLI 注入；默认 0 = 关闭，与历史结果可比）
+DECODE: dict = {"top_k": 0, "no_repeat_ngram": 0}
+
 CHAT_PROMPTS = ("你好", "今天天气怎么样？", "吃饭了吗？", "你是谁？",
                 "我喜欢听音乐", "晚安", "谢谢你", "早上好")
 COMPLETIONS = ("今天", "我想", "因为")
@@ -111,7 +114,9 @@ def generate(model: TinyTransformer, tok: CharTokenizer, prompt: str,
         return "", False, 0
     seqs, _ = model.generate_batch(ids, 1, max_new, temperature,
                                    np.random.default_rng(seed), tok.eos_id,
-                                   model.max_pos)
+                                   model.max_pos,
+                                   top_k=int(DECODE["top_k"]),
+                                   no_repeat_ngram=int(DECODE["no_repeat_ngram"]))
     resp = seqs[0][len(ids):]
     eos = tok.eos_id in resp
     text = tok.decode([t for t in resp if t != tok.eos_id])
@@ -263,7 +268,13 @@ def main() -> None:
     ap.add_argument("--max-new", type=int, default=24)
     ap.add_argument("--temperature", type=float, default=0.7)
     ap.add_argument("--json", type=str, default=None)
+    ap.add_argument("--top-k", type=int, default=0,
+                    help="采样时只保留概率最高的 k 个 token（0=关闭）")
+    ap.add_argument("--no-repeat-ngram", type=int, default=0,
+                    help="禁止重复出现过的 n-gram（0/1=关闭；实测可打破模板吸引子）")
     args = ap.parse_args()
+    DECODE["top_k"] = args.top_k
+    DECODE["no_repeat_ngram"] = args.no_repeat_ngram
 
     # 分布内 / 分布外文本（解码回字符，之后按每个模型自己的词表重编码）
     pool = np.load(args.pool, allow_pickle=False)

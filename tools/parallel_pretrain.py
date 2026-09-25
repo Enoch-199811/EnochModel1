@@ -41,6 +41,7 @@ from enochmodel1.enoch import (
     evaluate,
     generate_text,
     lm_step,
+    pretrain_step,
     save_checkpoint,
     token_loss,
 )
@@ -88,15 +89,22 @@ def unpack(model: TinyTransformer, buf) -> None:
 
 
 def worker_entry(idx: int, buf, avg, barrier, stop, ids, model, tokenizer,
-                 step_args, sync_steps, data_seed) -> None:
+                 step_args, sync_steps, data_seed, task_every: int = 0) -> None:
     """worker: 训练 sync_steps 步 -> 交出权重 -> 取回平均权重 -> 继续。"""
     opt = Adam(model.params)
     flat = np.frombuffer(buf, dtype=np.float32)
     flat_avg = np.frombuffer(avg, dtype=np.float32)
     rng = np.random.default_rng(data_seed + idx)
+    step_i = 0
     while True:
         for _ in range(sync_steps):
-            lm_step(model, opt, tokenizer, ids, rng, step_args)
+            # 交替：每 task_every 步做一次 (prompt -> answer+EOS) 的监督步，
+            # 让模型学会"答完就停"，而不是继续续写训练语料里的模板
+            if task_every and step_i % task_every == 0:
+                pretrain_step(model, opt, tokenizer, rng, step_args)
+            else:
+                lm_step(model, opt, tokenizer, ids, rng, step_args)
+            step_i += 1
         pack(model, flat)
         try:
             barrier.wait(timeout=1800)
@@ -134,6 +142,10 @@ def main() -> None:
     ap.add_argument("--lm-len", type=int, default=0, help="0 = 用配置默认值")
     ap.add_argument("--lr", type=float, default=3e-3)
     ap.add_argument("--entropy-beta", type=float, default=0.0)
+    ap.add_argument("--task-frac", type=float, default=0.0,
+                    help="答案+EOS 监督步的占比（0=纯 LM；0.25=每 4 步有 1 步监督）。"
+                         "纯 LM 训练出的模型永不吐 EOS，并在答完后续写模板吸引子，"
+                         "实测这正是一次监督步就能修掉的")
     ap.add_argument("--pool", type=str, default="/tmp/enoch_pool.npz")
     ap.add_argument("--val-chars", type=int, default=200_000)
     ap.add_argument("--out-dir", type=str, default="checkpoints/daily")
@@ -154,10 +166,12 @@ def main() -> None:
                             cfg["n_heads"], cfg["max_pos"], seed=args.seed,
                             dtype="float32")
     n_param = int(sum(v.size for v in model.params.values()))
-    step_args = argparse.Namespace(lm_len=lm_len, batch_prompts=args.batch,
-                                   entropy_beta=args.entropy_beta, lr=args.lr,
-                                   grad_clip=1.0, task="easy", score_mode="partial",
-                                   max_new=12, max_pos=model.max_pos)
+    task_every = max(int(round(1.0 / args.task_frac)), 2) if args.task_frac > 0 else 0
+    step_args = argparse.Namespace(
+        lm_len=lm_len, batch_prompts=args.batch, entropy_beta=args.entropy_beta,
+        lr=args.lr, grad_clip=1.0, task="easy", score_mode="partial",
+        max_new=12, max_pos=model.max_pos, group_size=1,
+        verbose_pretrain=False, rl_lr=args.lr)
     before_ppl = val_perplexity(model, tokenizer, val_ids, lm_len, args.batch)
 
     print(f"[并行预训练] {args.config} 参数={n_param:,} workers={args.workers} "
@@ -174,7 +188,7 @@ def main() -> None:
         ctx.Process(target=worker_entry,
                     args=(i, bufs[i], avg, barrier, stop, train_ids, model,
                           tokenizer, step_args, args.sync_steps,
-                          args.data_seed), daemon=True)
+                          args.data_seed, task_every), daemon=True)
         for i in range(args.workers)
     ]
     for p in procs:
@@ -249,6 +263,7 @@ def main() -> None:
         "config": args.config, "dims": cfg,
         "workers": args.workers, "sync_steps": args.sync_steps, "rounds": rounds,
         "batch": args.batch, "lm_len": lm_len, "lr": args.lr,
+        "task_frac": args.task_frac, "task_every": task_every,
         "params": n_param, "dtype": str(model.dtype),
         "tokens_seen": int(tokens), "tokens_per_param": round(tokens / n_param, 2),
         "train_seconds": round(train_secs, 1),

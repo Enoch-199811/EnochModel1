@@ -23,6 +23,10 @@ on:
         description: 数据采样种子 (同一配置开多个 job 时用不同值, 模型初值仍相同)
         type: string
         default: "1234"
+      task_frac:
+        description: 答案+EOS 监督步占比（0=纯 LM；0.25=每 4 步 1 步监督）
+        type: string
+        default: "0"
       replicas:
         description: 同一配置开几个副本 (各自独立 runner, 相同初值/不同 data_seed, 结束后自动权重平均)
         type: string
@@ -126,6 +130,7 @@ jobs:
             --minutes ${{ inputs.minutes }} \
             --sync-steps ${{ inputs.sync_steps }} \
             --data-seed ${{ matrix.data_seed }} \
+            --task-frac ${{ inputs.task_frac }} \
             --pool /tmp/pool.npz \
             --out-dir out/${{ matrix.config }}-r${{ matrix.replica }} \
             --tag ${{ matrix.config }}-r${{ matrix.replica }}
