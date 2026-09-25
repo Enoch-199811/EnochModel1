@@ -25,5 +25,5 @@ def test_resolve_absolute_and_none() -> None:
 
 
 def test_paths_exist_on_disk() -> None:
-    assert Path(".").resolve().name == PROJECT_ROOT.name
+    assert Path.cwd().name == PROJECT_ROOT.name
     assert DATA_DIR.exists()

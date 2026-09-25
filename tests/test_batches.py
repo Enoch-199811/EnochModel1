@@ -36,7 +36,7 @@ def test_build_rl_batch_advantage_weights() -> None:
         {"prompt_ids": tok.encode("1+2="), "resp_ids": tok.encode("3") + [tok.eos_id], "adv": 0.5},
         {"prompt_ids": tok.encode("2+3="), "resp_ids": tok.encode("5") + [tok.eos_id], "adv": -0.3},
     ]
-    X, targets, weights = build_rl_batch(samples, tok)
+    X, _targets, weights = build_rl_batch(samples, tok)
     assert X.shape == (2, 6)
     for i, adv in enumerate([0.5, -0.3]):
         np.testing.assert_array_equal(weights[i, 3:5], adv)

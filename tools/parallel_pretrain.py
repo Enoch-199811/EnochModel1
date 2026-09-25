@@ -16,11 +16,19 @@
 
 from __future__ import annotations
 
+# 允许直接用 python tools/xxx.py 运行 (不必先 uv sync / 激活 venv)
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "src"))
+
 import argparse
 import json
 import multiprocessing as mp
 import time
 from pathlib import Path
+
+import numpy as np
 
 # 必须先导入 enochmodel1 (它在 numpy 之前把 BLAS 线程设为 1), 否则多进程
 # worker 会各自开出多线程 BLAS, 在物理核上互相抢 (实测慢 7 倍)。
@@ -37,13 +45,15 @@ from enochmodel1.enoch import (
     token_loss,
 )
 
-import numpy as np  # noqa: E402  (必须在 enochmodel1 之后)
-
 CONFIGS: dict[str, dict] = {
-    "d64-L2-ctx128": dict(d_model=64, n_layers=2, n_heads=4, max_pos=128, lm_len=96),
-    "d128-L3-ctx192": dict(d_model=128, n_layers=3, n_heads=8, max_pos=192, lm_len=128),
-    "d192-L4-ctx256": dict(d_model=192, n_layers=4, n_heads=8, max_pos=256, lm_len=160),
-    "d256-L6-ctx384": dict(d_model=256, n_layers=6, n_heads=8, max_pos=384, lm_len=192),
+    "d64-L2-ctx128": {"d_model": 64, "n_layers": 2, "n_heads": 4,
+                      "max_pos": 128, "lm_len": 96},
+    "d128-L3-ctx192": {"d_model": 128, "n_layers": 3, "n_heads": 8,
+                       "max_pos": 192, "lm_len": 128},
+    "d192-L4-ctx256": {"d_model": 192, "n_layers": 4, "n_heads": 8,
+                       "max_pos": 256, "lm_len": 160},
+    "d256-L6-ctx384": {"d_model": 256, "n_layers": 6, "n_heads": 8,
+                       "max_pos": 384, "lm_len": 192},
 }
 
 SAMPLES = ("你好", "今天天气怎么样？", "1+2=", "你是谁？", "吃饭了吗？")
@@ -179,7 +189,7 @@ def main() -> None:
                 stop_flag = True
                 try:
                     barrier.wait(timeout=30)
-                except Exception:    # noqa: BLE001
+                except Exception:    # noqa: BLE001,S110  (主进程已在收尾)
                     pass
                 break
             acc = None

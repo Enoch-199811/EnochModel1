@@ -51,7 +51,7 @@ def test_layer_norm_normalizes() -> None:
     x = rng.normal(size=(2, 5, 8))
     gamma = rng.normal(size=(8,))
     beta = rng.normal(size=(8,))
-    y, (xhat, mu, var) = layer_norm(x, gamma, beta)
+    y, (xhat, mu, _var) = layer_norm(x, gamma, beta)
     assert y.shape == x.shape
     np.testing.assert_allclose(mu, x.mean(axis=-1, keepdims=True))
     np.testing.assert_allclose(xhat.mean(axis=-1), 0.0, atol=1e-10)

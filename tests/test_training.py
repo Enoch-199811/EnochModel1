@@ -13,6 +13,7 @@ from enochmodel1.enoch import (
     CharTokenizer,
     SpeedTracker,
     TinyTransformer,
+    check_gradients,
     evaluate,
     grow_vocab,
     lm_step,
@@ -20,7 +21,6 @@ from enochmodel1.enoch import (
     pretrain_step,
     rl_step,
     sample_group,
-    check_gradients,
     show_examples,
 )
 

@@ -7,6 +7,12 @@ train 工作流每个配置产出 ``train_report.json`` (由 tools/parallel_pret
 
 from __future__ import annotations
 
+# 允许直接用 python tools/xxx.py 运行 (不必先 uv sync / 激活 venv)
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "src"))
+
 import argparse
 import json
 from pathlib import Path
@@ -45,9 +51,9 @@ def markdown(reports: list[dict], best: dict | None) -> str:
             f"{r.get('val_perplexity_before')} → **{r.get('val_perplexity_after')}** | "
             f"{r.get('arith_accuracy')} |")
     if best:
-        lines += ["", f"**最佳**: `{best.get('tag')}` "
-                      f"(ppl {best.get('val_perplexity_after')}, "
-                      f"acc {best.get('arith_accuracy')})", ""]
+        lines += ["", (f"**最佳**: `{best.get('tag')}` "
+                       f"(ppl {best.get('val_perplexity_after')}, "
+                       f"acc {best.get('arith_accuracy')})"), ""]
         samples = best.get("samples") or {}
         if samples:
             lines.append("对话样例:")

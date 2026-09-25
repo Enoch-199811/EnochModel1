@@ -36,7 +36,6 @@ from typing import TextIO
 
 from ._paths import DATA_DIR
 
-
 DEFAULT_OUT_DIR = DATA_DIR / "corpus"
 RAW_DIR = DATA_DIR / "raw"
 DEFAULT_TARGET_CHARS = 1_000_000_000
@@ -89,7 +88,9 @@ class ShardWriter:
 
     def _open_next(self) -> None:
         path = self.shards_dir / f"shard_{self._idx:05d}.txt"
-        self._fh = open(path, "w", encoding="utf-8", buffering=1024 * 1024)
+        # 分片是流式写入的, 句柄持有到 finish() 才关闭
+        self._fh = open(path, "w",  # noqa: SIM115
+                        encoding="utf-8", buffering=1024 * 1024)
         self.files.append({"path": f"shards/{path.name}", "chars": 0})
         self._idx += 1
         self._shard_written = 0
@@ -210,15 +211,15 @@ def _extract_code_tarball(writer: ShardWriter, tarball: Path, budget: int,
 # ---------------------------------------------------------------------------
 
 _WIKI_RULES = [
-    (re.compile(r"<!--.*?-->", re.S), " "),
-    (re.compile(r"<ref[^>]*/>|<ref[^>]*>.*?</ref>", re.S), " "),
+    (re.compile(r"<!--.*?-->", re.DOTALL), " "),
+    (re.compile(r"<ref[^>]*/>|<ref[^>]*>.*?</ref>", re.DOTALL), " "),
     (re.compile(r"<[^>]+>"), " "),
     (re.compile(r"\{\{[^{}]*\}\}"), " "),
     (re.compile(r"\[\[(?:[^\]|]*\|)?([^\]]*)\]\]"), r"\1"),
     (re.compile(r"\[(?:https?|ftp)://[^\s\]]+\s*([^\]]*)\]"), r"\1"),
     (re.compile(r"'{2,}"), ""),
     (re.compile(r"={2,}"), " "),
-    (re.compile(r"^\s*[|!\-*#:;]+", re.M), " "),
+    (re.compile(r"^\s*[|!\-*#:;]+", re.MULTILINE), " "),
 ]
 
 
@@ -489,8 +490,7 @@ def generate_dialogue(writer: ShardWriter, budget: int,
                 ])
                 a = rng.choice([
                     f"{rng.choice(adjs)}，{rng.choice(details)}。",
-                    f"可以先从{rng.choice(starts)}开始，然后"
-                    f"{rng.choice(nexts)}，慢慢就会熟练。",
+                    f"可以先从{rng.choice(starts)}开始，然后{rng.choice(nexts)}，慢慢就会熟练。",
                     f"{rng.choice(plans)}。",
                 ])
                 session.append(f"你: {q}\n小诺: {a}")
@@ -523,9 +523,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="输出目录 (默认 data/corpus)")
     p.add_argument("--shard-chars", type=int, default=DEFAULT_SHARD_CHARS,
                    help="每个分片的字符数 (默认 64M)")
-    for key in DEFAULT_RATIOS:
+    for key, ratio in DEFAULT_RATIOS.items():
         p.add_argument(f"--{key}-chars", type=int, default=None,
-                       help=f"{key} 类别字符数 (默认按比例 {DEFAULT_RATIOS[key]:.0%})")
+                       help=f"{key} 类别字符数 (默认按比例 {ratio:.0%})")
     p.add_argument("--no-download", action="store_true",
                    help="跳过网络下载, 只使用已有缓存")
     p.add_argument("--seed", type=int, default=20260829, help="随机种子")

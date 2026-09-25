@@ -60,7 +60,7 @@ jobs:
 
       - name: 30 秒并行训练冒烟 (2 worker)
         run: |
-          python tools/parallel_pretrain.py --config d64-L2-ctx128 --workers 2 \
+          uv run python tools/parallel_pretrain.py --config d64-L2-ctx128 --workers 2 \
             --minutes 0.5 --sync-steps 5 --pool /tmp/pool.npz \
             --out-dir /tmp/smoke --tag ci-smoke --eval-n 5
 

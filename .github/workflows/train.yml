@@ -1,6 +1,6 @@
 name: train
 
-# 借用 GitHub Actions 的算力做真正的预训练: 每个配置一个 job, job 内部再用
+# 借用 GitHub Actions 的算力做真正的预训练: 每个模型配置一个 job, job 内部再用
 # tools/parallel_pretrain.py 开 N 个 worker 做同步数据并行 (4 vCPU runner 开 4 路)。
 # 公开仓库的 standard runner 不计费, 单 job 上限 6 小时。
 on:
@@ -12,7 +12,7 @@ on:
         default: all
         options: [all, d64-L2-ctx128, d128-L3-ctx192, d192-L4-ctx256, d256-L6-ctx384]
       minutes:
-        description: 每个 job 训练多少分钟 (runner 也有 6h 硬上限)
+        description: 每个 job 训练多少分钟 (runner 单 job 硬上限 6 小时)
         type: string
         default: "60"
       workers:
@@ -40,16 +40,31 @@ permissions:
   contents: write
 
 jobs:
+  # 用 prepare 计算矩阵: 矩阵不能出现在 jobs.<id>.if 里 (会判定 workflow 无效)
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        env:
+          CFG: ${{ inputs.config }}
+        run: |
+          ALL='["d64-L2-ctx128","d128-L3-ctx192","d192-L4-ctx256","d256-L6-ctx384"]'
+          if [ "$CFG" = "all" ]; then
+            echo "matrix={\"config\":$ALL}" >> "$GITHUB_OUTPUT"
+          else
+            echo "matrix={\"config\":[\"$CFG\"]}" >> "$GITHUB_OUTPUT"
+          fi
+
   train:
     name: train ${{ matrix.config }}
+    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 350
     strategy:
       fail-fast: false
-      matrix:
-        config: [d64-L2-ctx128, d128-L3-ctx192, d192-L4-ctx256, d256-L6-ctx384]
-    # config=all 时全跑, 否则只跑选中的那个
-    if: github.event.inputs.config == 'all' || github.event.inputs.config == matrix.config
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v5
 
@@ -69,7 +84,7 @@ jobs:
             --code-chars ${{ inputs.code_chars }} \
             --shard-chars 8000000 \
             --out-dir data/corpus
-          du -sh data/corpus
+          du -sh data/corpus && df -h /home/runner | tail -1
 
       - name: 拼装 token 池
         run: |
@@ -78,10 +93,11 @@ jobs:
             --math-chars ${{ inputs.math_chars }} \
             --code-chars ${{ inputs.code_chars }} \
             --val-chars 200000 --stats /tmp/pool_stats.json
+          cat /tmp/pool_stats.json
 
       - name: 数据并行预训练
         run: |
-          python tools/parallel_pretrain.py \
+          uv run python tools/parallel_pretrain.py \
             --config ${{ matrix.config }} \
             --workers ${{ inputs.workers }} \
             --minutes ${{ inputs.minutes }} \
@@ -146,9 +162,9 @@ jobs:
           rm -rf checkpoints/ci
           mkdir -p checkpoints/ci
           cp -r "${{ steps.collect.outputs.best_dir }}/." checkpoints/ci/
-          cp reports/latest.json checkpoints/ci/train_report.json 2>/dev/null || true
+          cp reports/latest.json checkpoints/ci/ 2>/dev/null || true
           git add -f checkpoints/ci reports/latest.json
-          git commit -m "ci: 归档 ${{ github.run_id }} 的最佳训练结果" || echo "无需提交"
+          git commit -m "ci: 归档 run ${{ github.run_id }} 的最佳训练结果" || echo "无需提交"
           git push -f origin ci-checkpoints
 
       - name: 上传汇总报告
