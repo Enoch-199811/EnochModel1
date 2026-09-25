@@ -88,12 +88,12 @@ def unpack(model: TinyTransformer, buf) -> None:
 
 
 def worker_entry(idx: int, buf, avg, barrier, stop, ids, model, tokenizer,
-                 step_args, sync_steps) -> None:
+                 step_args, sync_steps, data_seed) -> None:
     """worker: 训练 sync_steps 步 -> 交出权重 -> 取回平均权重 -> 继续。"""
     opt = Adam(model.params)
     flat = np.frombuffer(buf, dtype=np.float32)
     flat_avg = np.frombuffer(avg, dtype=np.float32)
-    rng = np.random.default_rng(1234 + idx)
+    rng = np.random.default_rng(data_seed + idx)
     while True:
         for _ in range(sync_steps):
             lm_step(model, opt, tokenizer, ids, rng, step_args)
@@ -137,7 +137,9 @@ def main() -> None:
     ap.add_argument("--pool", type=str, default="/tmp/enoch_pool.npz")
     ap.add_argument("--val-chars", type=int, default=200_000)
     ap.add_argument("--out-dir", type=str, default="checkpoints/daily")
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--seed", type=int, default=0, help="模型初始化种子")
+    ap.add_argument("--data-seed", type=int, default=1234,
+                    help="数据采样种子; 多个 job 用不同 data-seed 时模型初值仍相同, 便于之后平均权重")
     ap.add_argument("--eval-n", type=int, default=40, help="算术评估题数")
     ap.add_argument("--tag", type=str, default="", help="报告标签")
     args = ap.parse_args()
@@ -171,7 +173,8 @@ def main() -> None:
     procs = [
         ctx.Process(target=worker_entry,
                     args=(i, bufs[i], avg, barrier, stop, train_ids, model,
-                          tokenizer, step_args, args.sync_steps), daemon=True)
+                          tokenizer, step_args, args.sync_steps,
+                          args.data_seed), daemon=True)
         for i in range(args.workers)
     ]
     for p in procs:

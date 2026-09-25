@@ -16,9 +16,13 @@ on:
         type: string
         default: "60"
       workers:
-        description: 每个 job 开几个数据并行 worker (ubuntu-latest 是 4 vCPU)
+        description: 每个 job 开几个数据并行 worker (runner 的 vCPU 有配额, 多进程会被节流 ~20 倍, 保持 1)
         type: string
-        default: "4"
+        default: "1"
+      data_seed:
+        description: 数据采样种子 (同一配置开多个 job 时用不同值, 模型初值仍相同)
+        type: string
+        default: "1234"
       sync_steps:
         description: 每轮平均权重的步数
         type: string
@@ -108,6 +112,7 @@ jobs:
             --workers ${{ inputs.workers }} \
             --minutes ${{ inputs.minutes }} \
             --sync-steps ${{ inputs.sync_steps }} \
+            --data-seed ${{ inputs.data_seed }} \
             --pool /tmp/pool.npz \
             --out-dir out/${{ matrix.config }} \
             --tag ${{ matrix.config }}
