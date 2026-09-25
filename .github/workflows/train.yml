@@ -165,6 +165,8 @@ jobs:
         if: steps.collect.outputs.best_dir != ''
         env:
           BEST_DIR: ${{ steps.collect.outputs.best_dir }}
+          # run: 步骤里不会自动有 GITHUB_TOKEN, 必须显式映射 (否则 set -u 直接报错)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           # GITHUB_TOKEN (GitHub App) 不允许创建/更新 workflow 文件, 而从 master
