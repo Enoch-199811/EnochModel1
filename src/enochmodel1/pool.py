@@ -132,13 +132,19 @@ def build_pool(corpus_dir: str | Path = DEFAULT_CORPUS_DIR,
                dialogue_chars: int = 24_000_000,
                math_chars: int = 10_000_000,
                code_chars: int = 6_000_000,
+               chinese_chars: int = 0,
                ) -> tuple[np.ndarray, CharTokenizer, dict]:
-    """拼池子; 返回 (ids, tokenizer, stats)。"""
+    """拼池子; 返回 (ids, tokenizer, stats)。
+
+    ``chinese_chars > 0`` 时把真实中文 (维基正文) 也拼进来 —— 合成对话是模板化的,
+    真实中文能显著改善"日常说话"的语感; 代价是构建语料时要下载 zhwiki dump。
+    """
     corpus_dir = Path(corpus_dir)
     parts = {
         "dialogue": take_category(corpus_dir, "dialogue", dialogue_chars),
         "math": take_category(corpus_dir, "math", math_chars),
         "code": take_category(corpus_dir, "code", code_chars),
+        "chinese": take_category(corpus_dir, "chinese", chinese_chars),
     }
     parts = {k: v for k, v in parts.items() if v.size}
     if not parts:
@@ -170,6 +176,8 @@ def main() -> None:
     ap.add_argument("--dialogue-chars", type=int, default=24_000_000)
     ap.add_argument("--math-chars", type=int, default=10_000_000)
     ap.add_argument("--code-chars", type=int, default=6_000_000)
+    ap.add_argument("--chinese-chars", type=int, default=0,
+                    help="真实中文 (维基) 字符数; >0 需要语料构建时下载 zhwiki")
     ap.add_argument("--val-chars", type=int, default=200_000,
                     help="池子尾部留作验证集的字符数")
     ap.add_argument("--out", type=str, default="/tmp/enoch_pool.npz")
@@ -180,7 +188,8 @@ def main() -> None:
     if args.shards_dir:
         corpus_dir = str(Path(args.shards_dir).parent)
     ids, tokenizer, stats = build_pool(corpus_dir, args.dialogue_chars,
-                                       args.math_chars, args.code_chars)
+                                       args.math_chars, args.code_chars,
+                                       args.chinese_chars)
     stats["val_chars"] = min(args.val_chars, ids.size // 10)
     # 40M 字符的池子约 160MB, 用未压缩 npz: 写盘 <1s (压缩要几十秒且没收益)
     np.savez(args.out, ids=ids, vocab=np.array(list(tokenizer.chars)))

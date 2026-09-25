@@ -35,6 +35,10 @@ on:
         description: 语料里代码字符数 (0 = 不联网下载, 最快)
         type: string
         default: "4000000"
+      chinese_chars:
+        description: 真实中文 (维基) 字符数; >0 会下载 ~3.5GB zhwiki dump (+~5GB 磁盘, +~10 分钟)
+        type: string
+        default: "0"
 
 permissions:
   contents: write
@@ -78,10 +82,11 @@ jobs:
       - name: 构建语料 (对话优先)
         run: |
           uv run enoch-build-corpus \
-            --target-chars $((${{ inputs.dialogue_chars }} + ${{ inputs.math_chars }} + ${{ inputs.code_chars }})) \
+            --target-chars $((${{ inputs.dialogue_chars }} + ${{ inputs.math_chars }} + ${{ inputs.code_chars }} + ${{ inputs.chinese_chars }})) \
             --dialogue-chars ${{ inputs.dialogue_chars }} \
             --math-chars ${{ inputs.math_chars }} \
             --code-chars ${{ inputs.code_chars }} \
+            --chinese-chars ${{ inputs.chinese_chars }} \
             --shard-chars 8000000 \
             --out-dir data/corpus
           du -sh data/corpus && df -h /home/runner | tail -1
@@ -92,6 +97,7 @@ jobs:
             --dialogue-chars ${{ inputs.dialogue_chars }} \
             --math-chars ${{ inputs.math_chars }} \
             --code-chars ${{ inputs.code_chars }} \
+            --chinese-chars ${{ inputs.chinese_chars }} \
             --val-chars 200000 --stats /tmp/pool_stats.json
           cat /tmp/pool_stats.json
 
