@@ -1,0 +1,41 @@
+{
+  "tag": "d128-L3-ctx192-r0",
+  "config": "d128-L3-ctx192",
+  "dims": {
+    "d_model": 128,
+    "n_layers": 3,
+    "n_heads": 8,
+    "max_pos": 192,
+    "lm_len": 128
+  },
+  "workers": 1,
+  "sync_steps": 25,
+  "rounds": 633,
+  "batch": 8,
+  "lm_len": 128,
+  "lr": 0.003,
+  "task_frac": 0.25,
+  "task_every": 4,
+  "params": 771027,
+  "dtype": "float32",
+  "tokens_seen": 16204800,
+  "tokens_per_param": 21.02,
+  "train_seconds": 1201.6,
+  "tokens_per_s": 13486.1,
+  "val_perplexity_before": 629.464,
+  "val_perplexity_after": 2.598,
+  "arith_accuracy": 0.975,
+  "arith_mean_len": 1.25,
+  "train_chars": 11799988,
+  "val_chars": 200000,
+  "vocab_size": 595,
+  "pool": "/tmp/pool.npz",
+  "samples": {
+    "你好": "，今天过得怎么样？\n小诺: 还不错，就是有点忙，你呢？\n你: 什",
+    "今天天气怎么样？": "\n小诺: 下周读完一本书。\n\n你: 作业多吗？\n小诺: 作业好多",
+    "1+2=": "3",
+    "吃饭了吗？": "\n小诺: 刚吃过，谢谢关心。\n你: 给我讲讲这个知识点\n小诺: "
+  },
+  "checkpoint": "/home/runner/work/EnochModel1/EnochModel1/out/d128-L3-ctx192-r0",
+  "interrupted": false
+}
