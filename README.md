@@ -55,8 +55,9 @@ runner 上, 不占本机 (公开仓库的 standard runner 不计费, 单 job 上
 | 语料 | runner 上现造: `enoch-build-corpus` 按 **对话优先** 配比生成 → `enoch-pool` 按 manifest 偏移拼 token 池 (对话 24M / 数学 12M / 代码 4M) |
 | 产物 | 每个 job 上传 checkpoint + `train_report.json`; publish job 汇总对比表 (验证困惑度 / 算术准确率 / tok/s), 并把**最佳模型**归档到 `ci-checkpoints` 分支 |
 | 判定 | 汇总表以 `val_perplexity_after` 最低者为最佳, 同分看算术准确率 |
+| 算力 | 公开仓库 standard runner 免费; 4 vCPU/job, 单 job 上限 6 小时 |
 
-本地等价命令 (与 CI 完全一致, 方便先在本机冒烟再上云):
+本机只用来冒烟/验证, 日常训练都跑在云端 (CI 里同一条命令, 便于复现):
 
 ```bash
 uv run enoch-build-corpus --target-chars 40000000 --dialogue-chars 24000000 \
