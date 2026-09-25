@@ -138,8 +138,6 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:
@@ -160,18 +158,30 @@ jobs:
 
       - name: 把最佳 checkpoint 归档到 ci-checkpoints 分支
         if: steps.collect.outputs.best_dir != ''
+        env:
+          BEST_DIR: ${{ steps.collect.outputs.best_dir }}
         run: |
-          set -e
+          set -euo pipefail
+          # GITHUB_TOKEN (GitHub App) 不允许创建/更新 workflow 文件, 而从 master
+          # 拉分支会带上 .github/workflows/* -> 推送被拒。所以归档用**孤儿分支**,
+          # 只装模型与报告, 不含任何 workflow 文件。
+          rm -rf /tmp/archive && mkdir -p /tmp/archive
+          cp -r "$BEST_DIR/." /tmp/archive/
+          cp reports/latest.json /tmp/archive/train_report.json
+          {
+            echo "# EnochModel1 CI 训练归档 (孤儿分支, 只装产物)"
+            echo
+            echo "- run_id: ${{ github.run_id }}"
+            echo "- 最佳配置: $(jq -r .best reports/latest.json)"
+            echo "- 归档时间 (UTC): $(date -u +%FT%TZ)"
+          } > /tmp/archive/README.md
+          cd /tmp/archive
+          git init -q -b ci-checkpoints
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B ci-checkpoints
-          rm -rf checkpoints/ci
-          mkdir -p checkpoints/ci
-          cp -r "${{ steps.collect.outputs.best_dir }}/." checkpoints/ci/
-          cp reports/latest.json checkpoints/ci/ 2>/dev/null || true
-          git add -f checkpoints/ci reports/latest.json
-          git commit -m "ci: 归档 run ${{ github.run_id }} 的最佳训练结果" || echo "无需提交"
-          git push -f origin ci-checkpoints
+          git add -A
+          git commit -q -m "ci: 归档 run ${{ github.run_id }} 的最佳模型"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-checkpoints
 
       - name: 上传汇总报告
         uses: actions/upload-artifact@v4

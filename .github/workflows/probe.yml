@@ -1,0 +1,41 @@
+name: probe
+
+# 一次性环境探测: 打印 runner 的 CPU/BLAS/线程配置并实测单进程与多进程训练吞吐,
+# 用来判断"云端训练为什么慢"。手动触发, 约 1-3 分钟。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: 安装依赖
+        run: uv sync --locked
+
+      - name: runner 硬件信息
+        run: |
+          nproc
+          lscpu | head -20
+          free -h
+          df -h / | tail -1
+
+      - name: 训练吞吐探测
+        run: uv run python tools/ci_probe.py
+
+      - name: 关闭与开启多线程 BLAS 的对照
+        run: |
+          echo "--- 默认 (包内设为单线程) ---"
+          uv run python tools/ci_probe.py 2>&1 | grep '单进程'
+          echo "--- 强制 4 线程 BLAS ---"
+          ENOCH_BLAS_THREADS=4 OPENBLAS_NUM_THREADS=4 OMP_NUM_THREADS=4 \
+            uv run python tools/ci_probe.py 2>&1 | grep '单进程'
