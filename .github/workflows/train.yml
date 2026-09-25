@@ -23,6 +23,10 @@ on:
         description: 数据采样种子 (同一配置开多个 job 时用不同值, 模型初值仍相同)
         type: string
         default: "1234"
+      replicas:
+        description: 同一配置开几个副本 (各自独立 runner, 相同初值/不同 data_seed, 结束后自动权重平均)
+        type: string
+        default: "1"
       sync_steps:
         description: 每轮平均权重的步数
         type: string
@@ -57,16 +61,25 @@ jobs:
       - id: set
         env:
           CFG: ${{ inputs.config }}
+          REPLICAS: ${{ inputs.replicas }}
+          DATA_SEED: ${{ inputs.data_seed }}
         run: |
-          ALL='["d64-L2-ctx128","d128-L3-ctx192","d192-L4-ctx256","d256-L6-ctx384"]'
+          # 展开成 include 矩阵: 每个配置 x 每个副本, 副本用不同 data_seed
+          # (模型初值仍由 --seed 固定, 因此各副本之间可以直接平均权重)
           if [ "$CFG" = "all" ]; then
-            echo "matrix={\"config\":$ALL}" >> "$GITHUB_OUTPUT"
+            CONFIGS='["d64-L2-ctx128","d128-L3-ctx192","d192-L4-ctx256","d256-L6-ctx384"]'
           else
-            echo "matrix={\"config\":[\"$CFG\"]}" >> "$GITHUB_OUTPUT"
+            CONFIGS=$(jq -nc --arg c "$CFG" '[$c]')
           fi
+          MATRIX=$(jq -nc --argjson cfgs "$CONFIGS" --argjson n "$REPLICAS" \
+                          --argjson seed "$DATA_SEED" \
+            '{include: [ $cfgs[] as $c | range(0; $n) as $r
+                         | {config: $c, replica: $r, data_seed: ($seed + $r)} ]}')
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "$MATRIX"
 
   train:
-    name: train ${{ matrix.config }}
+    name: train ${{ matrix.config }} r${{ matrix.replica }}
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 350
@@ -112,18 +125,18 @@ jobs:
             --workers ${{ inputs.workers }} \
             --minutes ${{ inputs.minutes }} \
             --sync-steps ${{ inputs.sync_steps }} \
-            --data-seed ${{ inputs.data_seed }} \
+            --data-seed ${{ matrix.data_seed }} \
             --pool /tmp/pool.npz \
-            --out-dir out/${{ matrix.config }} \
-            --tag ${{ matrix.config }}
+            --out-dir out/${{ matrix.config }}-r${{ matrix.replica }} \
+            --tag ${{ matrix.config }}-r${{ matrix.replica }}
 
       - name: 训练摘要
         if: always()
         run: |
           {
-            echo "### train ${{ matrix.config }}"
+            echo "### train ${{ matrix.config }} r${{ matrix.replica }}"
             echo '```json'
-            cat out/${{ matrix.config }}/train_report.json 2>/dev/null || echo "no report"
+            cat out/${{ matrix.config }}-r${{ matrix.replica }}/train_report.json 2>/dev/null || echo "no report"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -131,8 +144,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ckpt-${{ matrix.config }}
-          path: out/${{ matrix.config }}/
+          name: ckpt-${{ matrix.config }}-r${{ matrix.replica }}
+          path: out/${{ matrix.config }}-r${{ matrix.replica }}/
           if-no-files-found: warn
           retention-days: 30
 
@@ -152,6 +165,30 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
+
+      - name: 重建语料池 (多副本平均时用于验证集)
+        if: inputs.replicas != '1'
+        run: |
+          uv run enoch-build-corpus \
+            --target-chars $((${{ inputs.dialogue_chars }} + ${{ inputs.math_chars }} + ${{ inputs.code_chars }} + ${{ inputs.chinese_chars }})) \
+            --dialogue-chars ${{ inputs.dialogue_chars }} \
+            --math-chars ${{ inputs.math_chars }} \
+            --code-chars ${{ inputs.code_chars }} \
+            --chinese-chars ${{ inputs.chinese_chars }} \
+            --shard-chars 8000000 --out-dir data/corpus
+          uv run enoch-pool --corpus-dir data/corpus --out /tmp/pool.npz \
+            --dialogue-chars ${{ inputs.dialogue_chars }} \
+            --math-chars ${{ inputs.math_chars }} \
+            --code-chars ${{ inputs.code_chars }} \
+            --chinese-chars ${{ inputs.chinese_chars }} \
+            --val-chars 200000
+
+      - name: 同配置多副本 -> 权重平均
+        if: inputs.replicas != '1'
+        run: |
+          uv run python tools/merge_replicas.py --root artifacts \
+            --pool /tmp/pool.npz --json reports/merge.json \
+            --val-chars 200000 --eval-n 20
 
       - name: 汇总所有 job 的报告
         id: collect
@@ -174,7 +211,7 @@ jobs:
           # 只装模型与报告, 不含任何 workflow 文件。
           rm -rf /tmp/archive && mkdir -p /tmp/archive
           cp -r "$BEST_DIR/." /tmp/archive/
-          cp reports/latest.json /tmp/archive/train_report.json
+          cp reports/latest.json /tmp/archive/ci_summary.json
           {
             echo "# EnochModel1 CI 训练归档 (孤儿分支, 只装产物)"
             echo

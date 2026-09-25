@@ -61,3 +61,21 @@ def test_averaged_model_can_forward_and_generate() -> None:
     seqs, _ = avg.generate_batch([0, 1], 2, 4, 0.0, np.random.default_rng(0),
                                  12, avg.max_pos)
     assert len(seqs) == 2
+
+
+def test_group_replica_dirs(tmp_path) -> None:
+    """artifact 目录命名解析: ckpt-<config>-r<k> 与旧的 ckpt-<config>。"""
+    from enochmodel1.merge import group_replica_dirs
+
+    for name in ("ckpt-d128-L3-ctx192-r0", "ckpt-d128-L3-ctx192-r1",
+                 "ckpt-d64-L2-ctx128", "ckpt-empty", "not-an-artifact"):
+        (tmp_path / name).mkdir()
+        if name != "ckpt-empty":
+            (tmp_path / name / "model.npz").write_bytes(b"x")
+
+    groups = group_replica_dirs(tmp_path)
+    # ckpt-empty 没有 model.npz, not-an-artifact 命名不匹配 -> 都被跳过
+    assert set(groups) == {"d128-L3-ctx192", "d64-L2-ctx128"}
+    assert [i for i, _ in groups["d128-L3-ctx192"]] == [0, 1]
+    assert [i for i, _ in groups["d64-L2-ctx128"]] == [0]     # 旧命名按副本 0 处理
+    assert group_replica_dirs(tmp_path / "does-not-exist") == {}
