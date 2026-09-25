@@ -57,7 +57,10 @@ runner 上, 不占本机 (公开仓库的 standard runner 不计费, 单 job 上
 | 判定 | 汇总表以 `val_perplexity_after` 最低者为最佳, 同分看算术准确率 |
 | 算力 | 公开仓库 standard runner 免费; 4 vCPU/job, 单 job 上限 6 小时 |
 
-本机只用来冒烟/验证, 日常训练都跑在云端 (CI 里同一条命令, 便于复现):
+本机只用来冒烟/验证, 日常训练都跑在云端 (CI 里同一条命令, 便于复现)。
+**重要**: runner 的 vCPU 有配额节流, 同一 job 里开多进程会慢 ~20 倍 ——
+保持 `workers=1`, 把并行度放到 job 之间; 实测数据与完整路线见
+[`docs/TRAINING.md`](docs/TRAINING.md)。
 
 ```bash
 uv run enoch-build-corpus --target-chars 40000000 --dialogue-chars 24000000 \
