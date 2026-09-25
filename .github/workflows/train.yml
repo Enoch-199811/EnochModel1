@@ -1,0 +1,159 @@
+name: train
+
+# 借用 GitHub Actions 的算力做真正的预训练: 每个配置一个 job, job 内部再用
+# tools/parallel_pretrain.py 开 N 个 worker 做同步数据并行 (4 vCPU runner 开 4 路)。
+# 公开仓库的 standard runner 不计费, 单 job 上限 6 小时。
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: 训练哪个配置 (all = 全部并行跑, 便于横向对比)
+        type: choice
+        default: all
+        options: [all, d64-L2-ctx128, d128-L3-ctx192, d192-L4-ctx256, d256-L6-ctx384]
+      minutes:
+        description: 每个 job 训练多少分钟 (runner 也有 6h 硬上限)
+        type: string
+        default: "60"
+      workers:
+        description: 每个 job 开几个数据并行 worker (ubuntu-latest 是 4 vCPU)
+        type: string
+        default: "4"
+      sync_steps:
+        description: 每轮平均权重的步数
+        type: string
+        default: "25"
+      dialogue_chars:
+        description: 语料里对话字符数 (日常智能的主要来源)
+        type: string
+        default: "24000000"
+      math_chars:
+        description: 语料里数学字符数
+        type: string
+        default: "12000000"
+      code_chars:
+        description: 语料里代码字符数 (0 = 不联网下载, 最快)
+        type: string
+        default: "4000000"
+
+permissions:
+  contents: write
+
+jobs:
+  train:
+    name: train ${{ matrix.config }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [d64-L2-ctx128, d128-L3-ctx192, d192-L4-ctx256, d256-L6-ctx384]
+    # config=all 时全跑, 否则只跑选中的那个
+    if: github.event.inputs.config == 'all' || github.event.inputs.config == matrix.config
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: 安装依赖
+        run: uv sync --locked
+
+      - name: 构建语料 (对话优先)
+        run: |
+          uv run enoch-build-corpus \
+            --target-chars $((${{ inputs.dialogue_chars }} + ${{ inputs.math_chars }} + ${{ inputs.code_chars }})) \
+            --dialogue-chars ${{ inputs.dialogue_chars }} \
+            --math-chars ${{ inputs.math_chars }} \
+            --code-chars ${{ inputs.code_chars }} \
+            --shard-chars 8000000 \
+            --out-dir data/corpus
+          du -sh data/corpus
+
+      - name: 拼装 token 池
+        run: |
+          uv run enoch-pool --corpus-dir data/corpus --out /tmp/pool.npz \
+            --dialogue-chars ${{ inputs.dialogue_chars }} \
+            --math-chars ${{ inputs.math_chars }} \
+            --code-chars ${{ inputs.code_chars }} \
+            --val-chars 200000 --stats /tmp/pool_stats.json
+
+      - name: 数据并行预训练
+        run: |
+          python tools/parallel_pretrain.py \
+            --config ${{ matrix.config }} \
+            --workers ${{ inputs.workers }} \
+            --minutes ${{ inputs.minutes }} \
+            --sync-steps ${{ inputs.sync_steps }} \
+            --pool /tmp/pool.npz \
+            --out-dir out/${{ matrix.config }} \
+            --tag ${{ matrix.config }}
+
+      - name: 训练摘要
+        if: always()
+        run: |
+          {
+            echo "### train ${{ matrix.config }}"
+            echo '```json'
+            cat out/${{ matrix.config }}/train_report.json 2>/dev/null || echo "no report"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传 checkpoint + 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ckpt-${{ matrix.config }}
+          path: out/${{ matrix.config }}/
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    name: 汇总结果 / 归档最佳模型
+    needs: train
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+
+      - name: 汇总所有 job 的报告
+        id: collect
+        run: |
+          uv run python tools/collect_ci_reports.py --root artifacts \
+            --out reports/latest.json --summary "$GITHUB_STEP_SUMMARY" \
+            --best-file /tmp/best_dir.txt
+          echo "best_dir=$(cat /tmp/best_dir.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: 把最佳 checkpoint 归档到 ci-checkpoints 分支
+        if: steps.collect.outputs.best_dir != ''
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B ci-checkpoints
+          rm -rf checkpoints/ci
+          mkdir -p checkpoints/ci
+          cp -r "${{ steps.collect.outputs.best_dir }}/." checkpoints/ci/
+          cp reports/latest.json checkpoints/ci/train_report.json 2>/dev/null || true
+          git add -f checkpoints/ci reports/latest.json
+          git commit -m "ci: 归档 ${{ github.run_id }} 的最佳训练结果" || echo "无需提交"
+          git push -f origin ci-checkpoints
+
+      - name: 上传汇总报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-reports
+          path: reports/
+          if-no-files-found: warn

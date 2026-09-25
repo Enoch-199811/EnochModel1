@@ -811,7 +811,7 @@
   "d_mlp": 128,
   "attn_dim": 48,
   "dtype": "float64",
-  "prune_source": "/home/jack/Models/EnochModel1/checkpoints/chat",
+  "prune_source": "checkpoints/chat",
   "prune_mlp_ratio": 0.5,
   "prune_head_ratio": 0.25,
   "prune_recover_steps": 300

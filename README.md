@@ -1,5 +1,8 @@
 # EnochModel1
 
+[![ci](https://github.com/Enoch-199811/EnochModel1/actions/workflows/ci.yml/badge.svg)](https://github.com/Enoch-199811/EnochModel1/actions/workflows/ci.yml)
+[![train](https://github.com/Enoch-199811/EnochModel1/actions/workflows/train.yml/badge.svg)](https://github.com/Enoch-199811/EnochModel1/actions/workflows/train.yml)
+
 纯 NumPy 的字符级微型 Transformer, 训练目标是"既答对、又简洁"
 (奖励 `reward = speed × score`)。项目用 [uv](https://docs.astral.sh/uv/)
 管理, 采用 src 布局, 核心代码集中在 `src/enochmodel1/enoch.py` 一份
@@ -38,6 +41,33 @@ uv run enoch-chat --checkpoint checkpoints/pretrain
 解析, 所以无论从哪个目录启动 `enoch-*` 命令都能找到 `data/` 和
 `checkpoints/`。也可以直接 `uv run python -m enochmodel1.pretrain --help`
 查看某个入口的完整参数。
+
+## 云端训练 (借用 GitHub Actions 的算力)
+
+仓库自带一条训练流水线 `.github/workflows/train.yml`: 预训练跑在 GitHub 的
+runner 上, 不占本机 (公开仓库的 standard runner 不计费, 单 job 上限 6 小时,
+每 job 4 vCPU / 16 GB)。
+
+| 环节 | 做法 |
+| --- | --- |
+| 触发 | Actions → **train** → Run workflow (可选配置 / 分钟数 / worker 数 / 语料配比) |
+| 并行 | 每个模型配置一个 job; job 内部再用 `tools/parallel_pretrain.py` 开 N 路**多进程数据并行**(纯 NumPy 单线程最快, 见优化文档), 每 `sync_steps` 步 barrier 同步并平均权重 |
+| 语料 | runner 上现造: `enoch-build-corpus` 按 **对话优先** 配比生成 → `enoch-pool` 按 manifest 偏移拼 token 池 (对话 24M / 数学 12M / 代码 4M) |
+| 产物 | 每个 job 上传 checkpoint + `train_report.json`; publish job 汇总对比表 (验证困惑度 / 算术准确率 / tok/s), 并把**最佳模型**归档到 `ci-checkpoints` 分支 |
+| 判定 | 汇总表以 `val_perplexity_after` 最低者为最佳, 同分看算术准确率 |
+
+本地等价命令 (与 CI 完全一致, 方便先在本机冒烟再上云):
+
+```bash
+uv run enoch-build-corpus --target-chars 40000000 --dialogue-chars 24000000 \
+    --math-chars 12000000 --code-chars 4000000 --shard-chars 8000000 --out-dir data/corpus
+uv run enoch-pool --corpus-dir data/corpus --out /tmp/pool.npz
+python tools/parallel_pretrain.py --config d128-L3-ctx192 --workers 4 --minutes 60 \
+    --pool /tmp/pool.npz --out-dir checkpoints/daily-128
+```
+
+`ci.yml` 每次 push/PR 会跑: 96 项单元测试 (py3.12/3.13)、梯度数值校验、ruff,
+以及一条"造小语料 → 拼池 → 30 秒并行训练 → 剪枝"的端到端冒烟。
 
 ## 性能 (记忆化 / 剪枝 / 降本增效)
 

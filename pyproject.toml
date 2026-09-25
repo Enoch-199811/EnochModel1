@@ -18,6 +18,7 @@ enoch-pretrain = "enochmodel1.pretrain:main"
 enoch-chat = "enochmodel1.chat:main"
 enoch-build-corpus = "enochmodel1.build_corpus:main"
 enoch-prune = "enochmodel1.prune:main"
+enoch-pool = "enochmodel1.pool:main"
 
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]

@@ -4,7 +4,7 @@
   "numpy": "2.5.2",
   "blas": "scipy-openblas",
   "cpu_threads": 16,
-  "checkpoint": "/home/jack/Models/EnochModel1/checkpoints/chat",
+  "checkpoint": "checkpoints/chat",
   "model": {
     "d_model": 64,
     "n_layers": 2,

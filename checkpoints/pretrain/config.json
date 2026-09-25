@@ -1,5 +1,5 @@
 {
-  "corpus": "/home/jack/Models/EnochModel1/data/corpus.txt",
+  "corpus": "data/corpus.txt",
   "lm_steps": 1000,
   "lm_len": 48,
   "task": "easy",
@@ -19,7 +19,7 @@
   "log_every": 10,
   "eval_every": 100,
   "eval_n": 20,
-  "out_dir": "/home/jack/Models/EnochModel1/checkpoints/pretrain",
+  "out_dir": "checkpoints/pretrain",
   "resume": null,
   "seed": 0,
   "vocab": [

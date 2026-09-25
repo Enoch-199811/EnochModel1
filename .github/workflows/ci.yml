@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - name: 安装依赖
+        run: uv sync --locked
+
+      - name: 单元测试
+        run: uv run pytest -q
+
+      - name: 梯度数值校验 (反向传播正确性)
+        run: uv run python -m enochmodel1.main --check-gradients
+
+      - name: Lint (ruff)
+        run: uvx ruff@0.16 check src tests tools
+
+  smoke:
+    name: 训练/剪枝/入口冒烟
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+
+      - name: 生成小语料 + 拼池
+        run: |
+          uv run enoch-build-corpus --target-chars 2000000 \
+            --code-chars 0 --math-chars 800000 --dialogue-chars 1200000 \
+            --shard-chars 500000 --out-dir /tmp/corpus
+          uv run enoch-pool --corpus-dir /tmp/corpus --out /tmp/pool.npz \
+            --dialogue-chars 600000 --math-chars 400000 --code-chars 0 \
+            --val-chars 20000 --stats /tmp/pool_stats.json
+          cat /tmp/pool_stats.json
+
+      - name: 30 秒并行训练冒烟 (2 worker)
+        run: |
+          python tools/parallel_pretrain.py --config d64-L2-ctx128 --workers 2 \
+            --minutes 0.5 --sync-steps 5 --pool /tmp/pool.npz \
+            --out-dir /tmp/smoke --tag ci-smoke --eval-n 5
+
+      - name: 剪枝冒烟
+        run: |
+          uv run enoch-prune --checkpoint /tmp/smoke --out-dir /tmp/smoke-pruned \
+            --mlp-prune 0.5 --head-prune 0.25 --dry-run --eval-n 5
