@@ -15,52 +15,17 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "src"))
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
+# 先导入本包 (它在 numpy 之前把 BLAS 线程设为 1), 再导入 numpy
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-def load_reports(root: Path) -> list[dict]:
-    reports = []
-    for path in sorted(root.rglob("train_report.json")):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            continue
-        data["_dir"] = str(path.parent)
-        reports.append(data)
-    return reports
-
-
-def rank_key(r: dict) -> tuple[float, float]:
-    """越小越好: (验证困惑度, -算术准确率)。"""
-    ppl = r.get("val_perplexity_after")
-    acc = r.get("arith_accuracy") or 0.0
-    return (float(ppl) if ppl is not None else float("inf"), -float(acc))
-
-
-def markdown(reports: list[dict], best: dict | None) -> str:
-    lines = ["## 训练结果汇总", ""]
-    lines.append("| 配置 | 参数 | workers | 轮数 | 已见 tokens | tokens/参数 | "
-                 "tok/s | 验证困惑度(前→后) | 算术准确率 |")
-    lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
-    for r in sorted(reports, key=rank_key):
-        lines.append(
-            f"| `{r.get('tag') or r.get('config')}` | {r.get('params', 0):,} | "
-            f"{r.get('workers')} | {r.get('rounds')} | "
-            f"{(r.get('tokens_seen') or 0) / 1e6:.2f}M | "
-            f"{r.get('tokens_per_param')} | {r.get('tokens_per_s'):,} | "
-            f"{r.get('val_perplexity_before')} → **{r.get('val_perplexity_after')}** | "
-            f"{r.get('arith_accuracy')} |")
-    if best:
-        lines += ["", (f"**最佳**: `{best.get('tag')}` "
-                       f"(ppl {best.get('val_perplexity_after')}, "
-                       f"acc {best.get('arith_accuracy')})"), ""]
-        samples = best.get("samples") or {}
-        if samples:
-            lines.append("对话样例:")
-            lines.append("")
-            for p, out in samples.items():
-                lines.append(f"- `{p}` → `{out}`")
-    return "\n".join(lines) + "\n"
+from enochmodel1.reports import (  # noqa: E402
+    load_reports,
+    markdown,
+    pick_best,
+)
 
 
 def main() -> None:
@@ -74,7 +39,7 @@ def main() -> None:
     args = ap.parse_args()
 
     reports = load_reports(Path(args.root))
-    best = min(reports, key=rank_key) if reports else None
+    best = pick_best(reports)
     md = markdown(reports, best)
     print(md)
 
