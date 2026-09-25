@@ -41,6 +41,7 @@ from .enoch import (
     evaluate,
     load_checkpoint,
     load_config,
+    model_from_config,
     pretrain_step,
     rl_step,
     save_checkpoint,
@@ -70,6 +71,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-layers", type=int, default=2, help="Transformer 层数")
     p.add_argument("--n-heads", type=int, default=4, help="注意力头数")
     p.add_argument("--max-pos", type=int, default=64, help="最大序列长度")
+    p.add_argument("--dtype", choices=["float64", "float32"], default="float64",
+                   help="参数 dtype: float64 最精确 (默认), float32 省一半内存/更快")
     p.add_argument("--lr", type=float, default=3e-3, help="学习率")
     p.add_argument("--rl-lr", type=float, default=1e-3,
                    help="RL 阶段学习率 (通常比预训练小, 更稳)")
@@ -121,15 +124,17 @@ def main() -> None:
 
     rng = np.random.default_rng(args.seed)
     tokenizer = CharTokenizer()
+    cfg = None
     if args.resume:
         cfg = load_config(args.resume)
         if cfg:
             tokenizer = tokenizer_from_config(cfg)
-            for key in ("d_model", "n_layers", "n_heads", "max_pos"):
-                if key in cfg:
-                    setattr(args, key, cfg[key])
-    model = TinyTransformer(tokenizer.vocab_size, args.d_model, args.n_layers,
-                            args.n_heads, args.max_pos, seed=args.seed)
+    model = model_from_config(
+        tokenizer, cfg,
+        fallback={"d_model": args.d_model, "n_layers": args.n_layers,
+                  "n_heads": args.n_heads, "max_pos": args.max_pos,
+                  "dtype": args.dtype},
+        seed=args.seed)
     if args.resume:
         load_checkpoint(model, tokenizer, args.resume)
         print(f"已从 {args.resume} 恢复模型 (词表 {tokenizer.vocab_size})\n")
@@ -153,9 +158,10 @@ def main() -> None:
     # ---- 阶段 2: speed × score 强化学习 ----
     ref_model: TinyTransformer | None = None
     if args.kl_beta > 0.0:
-        ref_model = TinyTransformer(tokenizer.vocab_size, args.d_model,
-                                    args.n_layers, args.n_heads, args.max_pos,
-                                    seed=args.seed)
+        ref_model = TinyTransformer(tokenizer.vocab_size, model.d_model,
+                                    model.n_layers, model.n_heads, model.max_pos,
+                                    seed=args.seed, d_mlp=model.d_mlp,
+                                    dtype=model.dtype)
         ref_model.params = {k: v.copy() for k, v in model.params.items()}
     speed = SpeedTracker(ema=args.speed_ema, floor=args.speed_floor)
     best_acc = -1.0

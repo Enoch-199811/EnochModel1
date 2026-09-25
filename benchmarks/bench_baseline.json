@@ -1,0 +1,57 @@
+{
+  "tag": "baseline",
+  "python": "3.12.12",
+  "numpy": "2.5.2",
+  "blas": "scipy-openblas",
+  "cpu_threads": 16,
+  "checkpoint": "/tmp/enoch_base/checkpoints/chat",
+  "model": {
+    "d_model": 64,
+    "n_layers": 2,
+    "n_heads": 4,
+    "max_pos": 128,
+    "vocab_size": 793,
+    "params": 210073,
+    "dtype": "float64"
+  },
+  "workloads": {
+    "decode_greedy_48": {
+      "median_s": 0.08185256800061325,
+      "best_s": 0.08177623499796027,
+      "tokens_generated": 48,
+      "tokens_per_s": 586.42020858332,
+      "ms_per_token": 1.7052618333461094
+    },
+    "decode_group4_24": {
+      "median_s": 0.08512266700199689,
+      "best_s": 0.08483879799678107,
+      "tokens_generated": 78,
+      "tokens_per_s": 916.3246729354732,
+      "ms_per_token": 1.0913162436153447
+    },
+    "lm_step": {
+      "median_s": 0.8605480410005839,
+      "best_s": 0.7278350490014418,
+      "steps_per_s": 23.24100346186998,
+      "ms_per_step": 43.027402050029195
+    },
+    "rl_step": {
+      "median_s": 0.7334610679972684,
+      "best_s": 0.47733710300235543,
+      "steps_per_s": 4.090196645599153,
+      "ms_per_step": 244.48702266575614
+    },
+    "fwd_bwd": {
+      "median_s": 0.8111307129984198,
+      "best_s": 0.796020709000004,
+      "ms_per_step": 40.55653564992099
+    }
+  },
+  "memory": {
+    "peak_rss_mib": 113.765625,
+    "rss_before_mib": 42.8046875,
+    "param_bytes": 1680584,
+    "ckpt_npz_bytes": 1687842
+  },
+  "total_s": 2.572115056998882
+}

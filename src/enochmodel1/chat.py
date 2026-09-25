@@ -43,6 +43,7 @@ from .enoch import (
     grow_vocab,
     load_checkpoint,
     load_config,
+    model_from_config,
     save_checkpoint,
     token_loss,
     tokenizer_from_config,
@@ -104,6 +105,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-layers", type=int, default=2, help="层数 (仅新模型)")
     p.add_argument("--n-heads", type=int, default=4, help="注意力头数 (仅新模型)")
     p.add_argument("--max-pos", type=int, default=256, help="最大序列长度")
+    p.add_argument("--dtype", choices=["float64", "float32"], default="float64",
+                   help="参数 dtype: float64 最精确 (默认), float32 省一半内存/更快")
     p.add_argument("--lr", type=float, default=3e-3, help="在线训练学习率")
     p.add_argument("--entropy-beta", type=float, default=0.02,
                    help="在线训练熵正则强度")
@@ -247,12 +250,17 @@ def main() -> None:
     cfg = load_config(ckpt) if ckpt else None
     tokenizer = tokenizer_from_config(cfg)
     if cfg:
-        for key in ("d_model", "n_layers", "n_heads", "max_pos"):
-            if key in cfg:
+        for key in ("d_model", "n_layers", "n_heads", "max_pos", "d_mlp",
+                    "dtype"):
+            if cfg.get(key) is not None:
                 setattr(args, key, cfg[key])
 
-    model = TinyTransformer(tokenizer.vocab_size, args.d_model, args.n_layers,
-                            args.n_heads, args.max_pos, seed=args.seed)
+    model = model_from_config(
+        tokenizer, cfg,
+        fallback={"d_model": args.d_model, "n_layers": args.n_layers,
+                  "n_heads": args.n_heads, "max_pos": args.max_pos,
+                  "dtype": args.dtype},
+        seed=args.seed)
     if ckpt:
         load_checkpoint(model, tokenizer, ckpt)
     opt = Adam(model.params)

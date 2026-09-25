@@ -1,0 +1,57 @@
+{
+  "tag": "optimized_fp32",
+  "python": "3.12.12",
+  "numpy": "2.5.2",
+  "blas": "scipy-openblas",
+  "cpu_threads": 16,
+  "checkpoint": "/home/jack/Models/EnochModel1/checkpoints/chat",
+  "model": {
+    "d_model": 64,
+    "n_layers": 2,
+    "n_heads": 4,
+    "max_pos": 128,
+    "vocab_size": 793,
+    "params": 210073,
+    "dtype": "float32"
+  },
+  "workloads": {
+    "decode_greedy_48": {
+      "median_s": 0.006516542998724617,
+      "best_s": 0.006416267999156844,
+      "tokens_generated": 48,
+      "tokens_per_s": 7365.868683655475,
+      "ms_per_token": 0.1357613124734295
+    },
+    "decode_group4_24": {
+      "median_s": 0.007103321000613505,
+      "best_s": 0.006955733999348013,
+      "tokens_generated": 78,
+      "tokens_per_s": 10980.779271169533,
+      "ms_per_token": 0.0910682179565834
+    },
+    "lm_step": {
+      "median_s": 0.22877759500261163,
+      "best_s": 0.21557283500078483,
+      "steps_per_s": 87.42114803581045,
+      "ms_per_step": 11.438879750130582
+    },
+    "rl_step": {
+      "median_s": 0.14994256499994663,
+      "best_s": 0.12316327199732768,
+      "steps_per_s": 20.00766093337851,
+      "ms_per_step": 49.980854999982206
+    },
+    "fwd_bwd": {
+      "median_s": 0.2354295839977567,
+      "best_s": 0.23305961399819353,
+      "ms_per_step": 11.771479199887835
+    }
+  },
+  "memory": {
+    "peak_rss_mib": 71.1875,
+    "rss_before_mib": 40.546875,
+    "param_bytes": 840292,
+    "ckpt_npz_bytes": 1687842
+  },
+  "total_s": 0.6277696079996531
+}

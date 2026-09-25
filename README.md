@@ -5,7 +5,7 @@
 管理, 采用 src 布局, 核心代码集中在 `src/enochmodel1/enoch.py` 一份
 共享库里。
 
-## 三个入口
+## 命令入口
 
 | 命令 | 作用 |
 | --- | --- |
@@ -13,6 +13,7 @@
 | `enoch-pretrain` | 预训练: 语料无监督下一个字符预测 (学语言) + 算术监督 (学会答对) |
 | `enoch-chat` | 日常对话: 手动输入, 可以直接纠正 (`!c`) 或打分 (`!s`) 并在线训练 |
 | `enoch-build-corpus` | 生成 10 亿字符的分片语料 `data/corpus/` |
+| `enoch-prune` | 结构化剪枝: 真的把 MLP 隐藏单元 / 注意力头切掉, 可选恢复训练 |
 
 ## 快速开始
 
@@ -38,17 +39,60 @@ uv run enoch-chat --checkpoint checkpoints/pretrain
 `checkpoints/`。也可以直接 `uv run python -m enochmodel1.pretrain --help`
 查看某个入口的完整参数。
 
+## 性能 (记忆化 / 剪枝 / 降本增效)
+
+这一轮优化做了三件事，且**行为逐位不变**（见 `docs/OPTIMIZATION.md` 的等价性表）：
+
+1. **记忆化**: 解码改为"预填充 + KV cache 增量解码"，不再每吐一个 token 就重算整段
+   前缀；causal mask / 前向 q,k,v 也都被复用；
+2. **计算剪枝**: 反向的 8 处 `np.einsum` 收缩换成单个 dgemm，`token_loss` 不再构造
+   one-hot；矩阵很小时关掉多线程 BLAS（默认单线程，CPU 时间降近 20 倍）；
+3. **存储剪枝**: `--dtype float32` 档、`savez_compressed` checkpoint、以及
+   `enoch-prune` 真正切小参数矩阵（MLP 隐藏单元 + 注意力头，带重要性排序与恢复训练）。
+
+实测（本机 i5-13500H，`benchmarks/bench_report.md`）：
+
+| 负载 | 优化前 | 优化后 | 加速比 |
+| --- | --- | --- | --- |
+| 贪心解码 | 1.71 ms/token | 0.16 ms/token | **10.9x** |
+| 4 路采样解码 | 1.09 ms/token | 0.12 ms/token | **9.2x** |
+| 语料 LM 步 | 43.03 ms | 21.38 ms | 2.0x |
+| RL 步 (含 rollout) | 244.49 ms | 97.83 ms | 2.5x |
+| `enoch-pretrain` 端到端 (200+100 步) | 10.87 s | 5.59 s | 1.9x (CPU 时间 91.6s → 4.6s) |
+| 峰值内存 | 113.8 MiB | 99.6 MiB (`--dtype float32` 71.2 MiB) | -12% / -37% |
+
+```bash
+# 复现基准
+uv run python tools/bench.py --tag optimized --out benchmarks/bench_optimized.json
+uv run python tools/compare.py benchmarks/bench_baseline.json \
+    benchmarks/bench_optimized.json --out benchmarks/bench_report.md
+
+# 更省内存/更快 (精度略降, 默认仍是 float64)
+uv run enoch-chat --checkpoint checkpoints/pretrain --dtype float32
+
+# 结构化剪枝 (不覆盖原 checkpoint)
+uv run enoch-prune --checkpoint checkpoints/chat --out-dir checkpoints/chat-pruned \
+                   --mlp-prune 0.5 --head-prune 0.25 --recover-steps 300
+```
+
+`checkpoints/chat-pruned/` 是这一轮剪枝的产物（参数 210,073 → 168,857，体积
+1.69 MB → 1.30 MB，恢复训练后算术准确率 0.983），可直接用
+`enoch-chat --checkpoint checkpoints/chat-pruned` 加载。
+
+需要多线程 BLAS 时导出 `ENOCH_BLAS_THREADS=8`（默认 1：小矩阵上单线程更快也更省 CPU）。
+
 ## 测试
 
 ```bash
 uv sync                  # 安装依赖 (pytest 作为 dev 依赖自动装好)
-uv run pytest            # 跑全部单元测试
+uv run pytest            # 跑全部单元测试 (96 项)
 uv run pytest -v         # 显示每个用例
 uv run pytest --cov=enochmodel1 --cov-report=term   # 附带覆盖率报告
 ```
 
 测试覆盖核心库 (softmax / LayerNorm / 分词器 / Transformer 前向反向 /
-损失 / Adam / 动态词表与序列扩展)、三种训练步骤 (预训练 / LM / RL)、
+损失 / Adam / 动态词表与序列扩展)、**增量解码与全量前向的等价性 (含采样 RNG 顺序)**、
+dtype 与 checkpoint 往返、结构化剪枝、三种训练步骤 (预训练 / LM / RL)、
 checkpoint 往返、入口模块的辅助函数和命令行参数解析。
 
 ## 对话里的训练命令

@@ -2,7 +2,7 @@
 EnochModel1 核心库 (enoch.py)
 =============================
 
-被三个入口共用的一份纯 NumPy 实现:
+被各个入口共用的一份纯 NumPy 实现:
 
 * main.py      预训练 + speed×score 强化学习演示 (RL 收缩实验);
 * pretrain.py  预训练入口: 语料无监督 LM + 算术监督训练;
@@ -43,6 +43,50 @@ def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
     m = x.max(axis=axis, keepdims=True)
     e = np.exp(x - m)
     return e / e.sum(axis=axis, keepdims=True)
+
+
+def softmax_inplace(x: np.ndarray, axis: int = -1) -> np.ndarray:
+    """原地 softmax: 直接覆盖 ``x`` 并返回它 (数值与 :func:`softmax` 等价)。
+
+    注意力分数在 [B,H,L,L] 量级, 去掉一次 exp 结果与一次除法的临时数组,
+    在训练热路径上是实打实的分配/拷贝削减。
+    """
+    x -= x.max(axis=axis, keepdims=True)
+    np.exp(x, out=x)
+    x /= x.sum(axis=axis, keepdims=True)
+    return x
+
+
+def log_softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
+    """数值稳定的 log-softmax (比 ``log(softmax(x))`` 更稳, 少一次 clip)。"""
+    m = x.max(axis=axis, keepdims=True)
+    e = x - m
+    np.exp(e, out=e)
+    return x - m - np.log(e.sum(axis=axis, keepdims=True))
+
+
+def atb(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """``sum_{n} a[n,:] ⊗ b[n,:]``, 即 ``np.einsum("nij,nik->jk", ...)``。
+
+    把 batch 维拍平成一个 dgemm, 比 c_einsum 的通用收缩快约 3 倍
+    (c_einsum 曾是反向传播的单项最大开销)。
+    """
+    return a.reshape(-1, a.shape[-1]).T @ b.reshape(-1, b.shape[-1])
+
+
+# 记忆化: causal mask 只与 (长度, dtype) 有关, 构造一次后全局复用。
+_CAUSAL_MASKS: dict[tuple[int, str], np.ndarray] = {}
+
+
+def causal_mask(length: int, dtype: np.dtype) -> np.ndarray:
+    """返回 [L, L] 的上三角 -inf 掩码 (只读复用, 调用方不得原地修改)。"""
+    key = (length, np.dtype(dtype).str)
+    m = _CAUSAL_MASKS.get(key)
+    if m is None:
+        m = np.full((length, length), -np.inf, dtype=dtype)
+        m[np.tril_indices(length)] = 0.0
+        _CAUSAL_MASKS[key] = m
+    return m
 
 
 def onehot(targets: np.ndarray, vocab_size: int) -> np.ndarray:
@@ -205,6 +249,47 @@ def make_prompt(rng: np.random.Generator, task: str = "easy") -> tuple[str, str]
 # 4. 微型因果 Transformer (纯 NumPy, 手写反向传播)
 # ---------------------------------------------------------------------------
 
+class KVCache:
+    """增量解码的记忆化缓存。
+
+    每层保存已经算过的 K/V(形状 ``[B, n_heads, capacity, head_dim]``),
+    解码下一步时只前向新 token, 直接复用历史 K/V —— 把每步的注意力
+    代价从 O(L²) 降到 O(L), 不再重算整段前缀。
+    """
+
+    __slots__ = ("K", "V", "batch", "capacity")
+
+    def __init__(self, model: TinyTransformer, batch: int,
+                 capacity: int) -> None:
+        H, dh, dt = model.n_heads, model.head_dim, model.dtype
+        self.K = [np.zeros((batch, H, capacity, dh), dtype=dt)
+                  for _ in range(model.n_layers)]
+        self.V = [np.zeros((batch, H, capacity, dh), dtype=dt)
+                  for _ in range(model.n_layers)]
+        self.batch = batch
+        self.capacity = capacity
+
+    def store(self, layer: int, positions, kh: np.ndarray,
+              vh: np.ndarray) -> None:
+        """写入一层的新 K/V。
+
+        ``positions`` 为 int 时表示连续区间 ``[p, p+n)`` (预填充);
+        为 ``[B]`` 数组时按行写入各自的位置 (解码时各行长度可能不同)。
+        """
+        if isinstance(positions, (int, np.integer)):
+            p = int(positions)
+            n = kh.shape[2]
+            self.K[layer][:, :, p:p + n, :] = kh
+            self.V[layer][:, :, p:p + n, :] = vh
+        else:
+            rows = np.arange(self.batch)
+            self.K[layer][rows, :, positions, :] = kh[:, :, 0, :]
+            self.V[layer][rows, :, positions, :] = vh[:, :, 0, :]
+
+    def nbytes(self) -> int:
+        return (sum(a.nbytes for a in self.K) + sum(a.nbytes for a in self.V))
+
+
 class TinyTransformer:
     """字符级因果 Transformer。
 
@@ -214,38 +299,51 @@ class TinyTransformer:
     """
 
     def __init__(self, vocab_size: int, d_model: int = 64, n_layers: int = 2,
-                 n_heads: int = 4, max_pos: int = 64, seed: int = 0) -> None:
-        assert d_model % n_heads == 0, "d_model 必须能被 n_heads 整除"
+                 n_heads: int = 4, max_pos: int = 64, seed: int = 0,
+                 d_mlp: int | None = None, attn_dim: int | None = None,
+                 dtype: str | np.dtype = np.float64) -> None:
         self.vocab_size = vocab_size
         self.d_model = d_model
         self.n_layers = n_layers
         self.n_heads = n_heads
         self.max_pos = max_pos
-        self.head_dim = d_model // n_heads
+        # 注意力内部宽度: 默认 = d_model; 头剪枝后可小于 d_model
+        # (k 个保留头 × head_dim), W_q/W_k/W_v 变窄、W_o 行数变少。
+        # head_dim 由 attn_dim 决定 (默认 = d_model), 因此只要求 attn_dim
+        # 能被 n_heads 整除; 头剪枝后 n_heads 可以不再整除 d_model。
+        self.attn_dim = int(attn_dim) if attn_dim is not None else d_model
+        assert self.attn_dim % n_heads == 0, "attn_dim 必须能被 n_heads 整除"
+        self.head_dim = self.attn_dim // n_heads
+        # MLP 隐藏层宽度: 默认 4*d_model; 结构化剪枝可以把它调窄
+        self.d_mlp = int(d_mlp) if d_mlp is not None else 4 * d_model
+        self.dtype = np.dtype(dtype)
 
         rng = np.random.default_rng(seed)
+        dt = self.dtype
+        ad = self.attn_dim
         self.params: dict[str, np.ndarray] = {}
-        self.params["W_e"] = rng.normal(0.0, 0.02, (vocab_size, d_model))
-        self.params["W_p"] = rng.normal(0.0, 0.02, (max_pos, d_model))
-        self.params["W_out"] = rng.normal(0.0, 0.02, (d_model, vocab_size))
-        self.params["b_out"] = np.zeros(vocab_size)
+        self.params["W_e"] = rng.normal(0.0, 0.02, (vocab_size, d_model)).astype(dt, copy=False)
+        self.params["W_p"] = rng.normal(0.0, 0.02, (max_pos, d_model)).astype(dt, copy=False)
+        self.params["W_out"] = rng.normal(0.0, 0.02, (d_model, vocab_size)).astype(dt, copy=False)
+        self.params["b_out"] = np.zeros(vocab_size, dtype=dt)
 
         scale = 1.0 / math.sqrt(d_model)
+        dm = self.d_mlp
         for l in range(n_layers):
-            self.params[f"W_q{l}"] = rng.normal(0.0, scale, (d_model, d_model))
-            self.params[f"W_k{l}"] = rng.normal(0.0, scale, (d_model, d_model))
-            self.params[f"W_v{l}"] = rng.normal(0.0, scale, (d_model, d_model))
-            self.params[f"W_o{l}"] = rng.normal(0.0, scale, (d_model, d_model))
-            self.params[f"W_1{l}"] = rng.normal(0.0, scale, (d_model, 4 * d_model))
-            self.params[f"b_1{l}"] = np.zeros(4 * d_model)
-            self.params[f"W_2{l}"] = rng.normal(0.0, scale, (4 * d_model, d_model))
-            self.params[f"b_2{l}"] = np.zeros(d_model)
-            self.params[f"g_ln1{l}"] = np.ones(d_model)
-            self.params[f"b_ln1{l}"] = np.zeros(d_model)
-            self.params[f"g_ln2{l}"] = np.ones(d_model)
-            self.params[f"b_ln2{l}"] = np.zeros(d_model)
-        self.params["g_lnf"] = np.ones(d_model)
-        self.params["b_lnf"] = np.zeros(d_model)
+            self.params[f"W_q{l}"] = rng.normal(0.0, scale, (d_model, ad)).astype(dt, copy=False)
+            self.params[f"W_k{l}"] = rng.normal(0.0, scale, (d_model, ad)).astype(dt, copy=False)
+            self.params[f"W_v{l}"] = rng.normal(0.0, scale, (d_model, ad)).astype(dt, copy=False)
+            self.params[f"W_o{l}"] = rng.normal(0.0, scale, (ad, d_model)).astype(dt, copy=False)
+            self.params[f"W_1{l}"] = rng.normal(0.0, scale, (d_model, dm)).astype(dt, copy=False)
+            self.params[f"b_1{l}"] = np.zeros(dm, dtype=dt)
+            self.params[f"W_2{l}"] = rng.normal(0.0, scale, (dm, d_model)).astype(dt, copy=False)
+            self.params[f"b_2{l}"] = np.zeros(d_model, dtype=dt)
+            self.params[f"g_ln1{l}"] = np.ones(d_model, dtype=dt)
+            self.params[f"b_ln1{l}"] = np.zeros(d_model, dtype=dt)
+            self.params[f"g_ln2{l}"] = np.ones(d_model, dtype=dt)
+            self.params[f"b_ln2{l}"] = np.zeros(d_model, dtype=dt)
+        self.params["g_lnf"] = np.ones(d_model, dtype=dt)
+        self.params["b_lnf"] = np.zeros(d_model, dtype=dt)
         self._last_cache: dict | None = None
 
     def add_vocab(self, n_new: int) -> None:
@@ -271,17 +369,23 @@ class TinyTransformer:
 
     # -- 前向 ---------------------------------------------------------------
 
-    def forward(self, X: np.ndarray) -> tuple[np.ndarray, dict]:
-        """X: [B, L] token id (右侧 padding)。返回 (logits, cache)。"""
+    def forward(self, X: np.ndarray, kv: KVCache | None = None,
+                kv_offset: int = 0) -> tuple[np.ndarray, dict]:
+        """X: [B, L] token id (右侧 padding)。返回 (logits, cache)。
+
+        传入 ``kv`` 时, 每层的 K/V 会写入缓存的 ``[kv_offset, kv_offset+L)``
+        区间 (预填充阶段用), 供后续 :meth:`decode_step` 增量解码复用。
+        """
         B, L = X.shape
-        d = self.d_model
         P = self.params
+        H = self.n_heads
+        dh = self.head_dim
+        ad = self.attn_dim
         cache: dict = {"X": X.copy()}
 
         h = P["W_e"][X] + P["W_p"][:L][None, :, :]  # [B, L, d]
 
-        causal = np.full((L, L), -np.inf, dtype=np.float64)
-        causal[np.tril_indices(L)] = 0.0
+        causal = causal_mask(L, h.dtype)  # 记忆化, 不再每次重建
 
         for l in range(self.n_layers):
             # 第一个 LayerNorm + 多头注意力
@@ -289,27 +393,32 @@ class TinyTransformer:
             q = ln1 @ P[f"W_q{l}"]   # [B, L, d]
             k = ln1 @ P[f"W_k{l}"]
             v = ln1 @ P[f"W_v{l}"]
-            H = self.n_heads
-            dh = self.head_dim
             qh = q.reshape(B, L, H, dh).transpose(0, 2, 1, 3)  # [B,H,L,dh]
             kh = k.reshape(B, L, H, dh).transpose(0, 2, 1, 3)
             vh = v.reshape(B, L, H, dh).transpose(0, 2, 1, 3)
-            scores = qh @ kh.transpose(0, 1, 3, 2) / math.sqrt(dh)  # [B,H,L,L]
-            att = softmax(scores + causal[None, None, :, :], axis=-1)
-            ctx_h = att @ vh  # [B,H,L,dh]
-            ctx = ctx_h.transpose(0, 2, 1, 3).reshape(B, L, d)
+            if kv is not None:
+                kv.store(l, kv_offset, kh, vh)
+            scores = qh @ kh.transpose(0, 1, 3, 2)  # [B,H,L,L]
+            scores /= math.sqrt(dh)
+            scores += causal[None, None, :, :]      # 原地累加, 省一次分配
+            att = softmax_inplace(scores)
+            ctx = (att @ vh).transpose(0, 2, 1, 3).reshape(B, L, ad)
             att_out = ctx @ P[f"W_o{l}"]
-            h2 = h + att_out
+            att_out += h          # 残差融合 (h 之后不再需要)
+            h2 = att_out
 
             # 第二个 LayerNorm + MLP
             ln2, (xhat2, mu2, var2) = layer_norm(h2, P[f"g_ln2{l}"], P[f"b_ln2{l}"])
             pre = ln2 @ P[f"W_1{l}"] + P[f"b_1{l}"]
             act = gelu(pre)
-            mlp_out = act @ P[f"W_2{l}"] + P[f"b_2{l}"]
-            h = h2 + mlp_out
+            mlp_out = act @ P[f"W_2{l}"]
+            mlp_out += P[f"b_2{l}"]
+            mlp_out += h2         # 残差融合
+            h = mlp_out
 
             cache[f"ln1{l}"] = (ln1, xhat1, mu1, var1)
-            cache[f"att{l}"] = (att, ctx_h, ctx)
+            cache[f"att{l}"] = (att, ctx)
+            cache[f"qkv{l}"] = (q, k, v)   # 反向复用, 省 3 次投影 matmul
             cache[f"ln2{l}"] = (ln2, xhat2, mu2, var2)
             cache[f"mlp{l}"] = (pre, act)
 
@@ -317,6 +426,59 @@ class TinyTransformer:
         logits = lnf @ P["W_out"] + P["b_out"]
         cache["lnf"] = (lnf, xhatf, muf, varf)
         return logits, cache
+
+    # -- 增量解码 (记忆化: 复用历史 K/V, 不再重算前缀) ----------------------
+
+    def decode_step(self, tokens: np.ndarray, positions: np.ndarray,
+                    kv: KVCache) -> np.ndarray:
+        """一次只前向一个新 token: tokens/positions 均为 [B]。
+
+        复用 ``kv`` 里已缓存的历史 K/V, 只把当前 token 过一遍网络,
+        每步代价从 O(L²) 降到 O(L)。返回 [B, vocab] 的下一 token logits。
+        """
+        B = tokens.shape[0]
+        P = self.params
+        H = self.n_heads
+        dh = self.head_dim
+        ad = self.attn_dim
+
+        h = (P["W_e"][tokens] + P["W_p"][positions])[:, None, :]  # [B,1,d]
+        Lmax = int(positions.max()) + 1
+        keep = np.arange(Lmax)[None, :] <= positions[:, None]     # [B,Lmax]
+        mask = np.where(keep[:, None, None, :], 0.0, -np.inf).astype(
+            h.dtype, copy=False)
+
+        for l in range(self.n_layers):
+            ln1, _ = layer_norm(h, P[f"g_ln1{l}"], P[f"b_ln1{l}"])
+            q = ln1 @ P[f"W_q{l}"]
+            k = ln1 @ P[f"W_k{l}"]
+            v = ln1 @ P[f"W_v{l}"]
+            qh = q.reshape(B, 1, H, dh).transpose(0, 2, 1, 3)
+            kh = k.reshape(B, 1, H, dh).transpose(0, 2, 1, 3)
+            vh = v.reshape(B, 1, H, dh).transpose(0, 2, 1, 3)
+            kv.store(l, positions, kh, vh)          # 逐行写入 (位置可能不同)
+            K = kv.K[l][:, :, :Lmax, :]
+            V = kv.V[l][:, :, :Lmax, :]
+            scores = qh @ K.transpose(0, 1, 3, 2)
+            scores /= math.sqrt(dh)
+            scores += mask
+            att = softmax_inplace(scores)
+            ctx = (att @ V).transpose(0, 2, 1, 3).reshape(B, 1, ad)
+            att_out = ctx @ P[f"W_o{l}"]
+            att_out += h
+            h2 = att_out
+
+            ln2, _ = layer_norm(h2, P[f"g_ln2{l}"], P[f"b_ln2{l}"])
+            pre = ln2 @ P[f"W_1{l}"] + P[f"b_1{l}"]
+            act = gelu(pre)
+            mlp_out = act @ P[f"W_2{l}"]
+            mlp_out += P[f"b_2{l}"]
+            mlp_out += h2
+            h = mlp_out
+
+        lnf, _ = layer_norm(h, P["g_lnf"], P["b_lnf"])
+        logits = lnf @ P["W_out"] + P["b_out"]
+        return logits[:, 0, :]
 
     def _set_cache(self, cache: dict) -> None:
         """保存最近一次前向的中间结果, 供 backward 使用。"""
@@ -328,8 +490,8 @@ class TinyTransformer:
                  pad_id: int) -> dict[str, np.ndarray]:
         """dlogits: [B, L, V]。返回各参数梯度 (与 self.params 同构)。"""
         B, L = X.shape
-        d = self.d_model
         P = self.params
+        ad = self.attn_dim
         cache = self._last_cache
         if cache is None:
             raise RuntimeError("backward 前必须先调用 forward 并 _set_cache")
@@ -337,7 +499,7 @@ class TinyTransformer:
 
         lnf, xhatf, _muf, varf = cache["lnf"]
         dlnf = dlogits @ P["W_out"].T
-        grads["W_out"] = np.einsum("bij,bik->jk", lnf, dlogits)
+        grads["W_out"] = atb(lnf, dlogits)
         grads["b_out"] = dlogits.sum(axis=(0, 1))
         dh, grads["g_lnf"], grads["b_lnf"] = layer_norm_backward(
             dlnf, xhatf, P["g_lnf"], varf)
@@ -347,11 +509,10 @@ class TinyTransformer:
             pre, act = cache[f"mlp{l}"]
             d_mlp_out = dh  # 残差: h_out = h2 + mlp_out
             dact = d_mlp_out @ P[f"W_2{l}"].T
-            grads[f"W_2{l}"] = np.einsum("bij,bik->jk", act, d_mlp_out)
+            grads[f"W_2{l}"] = atb(act, d_mlp_out)
             grads[f"b_2{l}"] = d_mlp_out.sum(axis=(0, 1))
             dpre = dact * gelu_grad(pre)
-            grads[f"W_1{l}"] = np.einsum("bij,bik->jk",
-                                         cache[f"ln2{l}"][0], dpre)
+            grads[f"W_1{l}"] = atb(cache[f"ln2{l}"][0], dpre)
             grads[f"b_1{l}"] = dpre.sum(axis=(0, 1))
 
             _ln2, xhat2, _mu2, var2 = cache[f"ln2{l}"]
@@ -362,27 +523,29 @@ class TinyTransformer:
 
             # --- 注意力反向 ---
             ln1, xhat1, _mu1, var1 = cache[f"ln1{l}"]
-            att, _ctx_h, ctx = cache[f"att{l}"]
+            att, ctx = cache[f"att{l}"]
             d_att_out = dh2
-            grads[f"W_o{l}"] = np.einsum("bij,bik->jk", ctx, d_att_out)
+            grads[f"W_o{l}"] = atb(ctx, d_att_out)
             dctx = d_att_out @ P[f"W_o{l}"].T
             H = self.n_heads
             dh_dim = self.head_dim
             dctx_h = dctx.reshape(B, L, H, dh_dim).transpose(0, 2, 1, 3)
-            qh = (ln1 @ P[f"W_q{l}"]).reshape(B, L, H, dh_dim).transpose(0, 2, 1, 3)
-            kh = (ln1 @ P[f"W_k{l}"]).reshape(B, L, H, dh_dim).transpose(0, 2, 1, 3)
-            vh = (ln1 @ P[f"W_v{l}"]).reshape(B, L, H, dh_dim).transpose(0, 2, 1, 3)
+            # 复用前向缓存的 q/k/v, 省掉 3 次投影 matmul
+            q, k, v = cache[f"qkv{l}"]
+            qh = q.reshape(B, L, H, dh_dim).transpose(0, 2, 1, 3)
+            kh = k.reshape(B, L, H, dh_dim).transpose(0, 2, 1, 3)
+            vh = v.reshape(B, L, H, dh_dim).transpose(0, 2, 1, 3)
             datt = dctx_h @ vh.transpose(0, 1, 3, 2)
             dscores = att * (datt - (datt * att).sum(axis=-1, keepdims=True))
             dqh = dscores @ kh / math.sqrt(dh_dim)
             dkh = dscores.transpose(0, 1, 3, 2) @ qh / math.sqrt(dh_dim)
             dvh = att.transpose(0, 1, 3, 2) @ dctx_h
-            dq = dqh.transpose(0, 2, 1, 3).reshape(B, L, d)
-            dk = dkh.transpose(0, 2, 1, 3).reshape(B, L, d)
-            dv = dvh.transpose(0, 2, 1, 3).reshape(B, L, d)
-            grads[f"W_q{l}"] = np.einsum("bij,bik->jk", ln1, dq)
-            grads[f"W_k{l}"] = np.einsum("bij,bik->jk", ln1, dk)
-            grads[f"W_v{l}"] = np.einsum("bij,bik->jk", ln1, dv)
+            dq = dqh.transpose(0, 2, 1, 3).reshape(B, L, ad)
+            dk = dkh.transpose(0, 2, 1, 3).reshape(B, L, ad)
+            dv = dvh.transpose(0, 2, 1, 3).reshape(B, L, ad)
+            grads[f"W_q{l}"] = atb(ln1, dq)
+            grads[f"W_k{l}"] = atb(ln1, dk)
+            grads[f"W_v{l}"] = atb(ln1, dv)
             d_ln1_out = dq @ P[f"W_q{l}"].T + dk @ P[f"W_k{l}"].T + dv @ P[f"W_v{l}"].T
             dh, grads[f"g_ln1{l}"], grads[f"b_ln1{l}"] = layer_norm_backward(
                 d_ln1_out, xhat1, P[f"g_ln1{l}"], var1)
@@ -403,35 +566,51 @@ class TinyTransformer:
         """对同一个 prompt 采样 group_size 条回答。
 
         返回 (回答序列列表[含 eos, 无 padding], 每步 logprob 列表)。
+
+        实现是"预填充 + 增量解码": prompt 只前向一次并写入 :class:`KVCache`,
+        之后每步只喂一个新 token。采样顺序 (逐行、每行一次 ``rng.choice``)
+        与朴素全量前向完全一致, 因此同 seed 下输出可复现。
         """
         W = min(len(prompt_ids) + max_new, max_pos)
         seqs: list[list[int]] = [list(prompt_ids) for _ in range(group_size)]
         done = [False] * group_size
         logprob_rows: list[list[float]] = [[] for _ in range(group_size)]
+        if max_new <= 0 or not prompt_ids or W <= 0:
+            return seqs, logprob_rows
+
+        capacity = W
+        kv = KVCache(self, group_size, capacity)
+        first = np.asarray(prompt_ids[:capacity], dtype=np.int64)
+        Xp = np.tile(first, (group_size, 1))
+        logits, cache = self.forward(Xp, kv=kv, kv_offset=0)
+        self._set_cache(cache)
+        row_logits = logits[:, Xp.shape[1] - 1, :]
 
         for _ in range(max_new):
-            X = np.full((group_size, W), 0, dtype=np.int64)
-            for i, s in enumerate(seqs):
-                X[i, :len(s)] = s
-            logits, cache = self.forward(X)
-            self._set_cache(cache)
             for i in range(group_size):
                 if done[i]:
                     continue
-                pos = len(seqs[i]) - 1
                 if temperature <= 0.0:
-                    tok = int(np.argmax(logits[i, pos]))
+                    tok = int(np.argmax(row_logits[i]))
                     logprob_rows[i].append(0.0)
                 else:
-                    p = softmax(logits[i, pos] / temperature)
+                    p = softmax(row_logits[i] / temperature)
                     p = p / p.sum()  # 归一化, 避免浮点误差
                     tok = int(rng.choice(self.vocab_size, p=p))
                     logprob_rows[i].append(float(np.log(max(p[tok], 1e-12))))
-                seqs[i].append(tok)  # eos 也计入序列, 供 truncation 判断
+                if len(seqs[i]) < capacity:
+                    seqs[i].append(tok)  # eos 也计入序列, 供 truncation 判断
+                else:
+                    done[i] = True       # 达到最大长度: 停止增长 (剪掉越界写入)
                 if tok == eos_id:
                     done[i] = True
             if all(done):
                 break
+            tokens = np.fromiter((s[-1] for s in seqs), dtype=np.int64,
+                                 count=group_size)
+            positions = np.fromiter((len(s) - 1 for s in seqs), dtype=np.int64,
+                                    count=group_size)
+            row_logits = self.decode_step(tokens, positions, kv)
         return seqs, logprob_rows
 
 
@@ -464,33 +643,41 @@ def token_loss(logits: np.ndarray, targets: np.ndarray, weights: np.ndarray,
                 防止 RL 阶段策略坍塌 (标准做法, 类似 PPO/GRPO)。
     返回 (loss, dlogits)。
     """
-    probs = softmax(logits, axis=-1)
-    B, L, V = logits.shape
-    logp = np.log(np.clip(probs, 1e-12, 1.0))
+    B, L, _V = logits.shape
+    logp = log_softmax(logits, axis=-1)   # 稳定且无需 clip
+    probs = np.exp(logp)
+    weights = np.asarray(weights, dtype=logp.dtype)
     idx_b = np.arange(B)[:, None]
     idx_l = np.arange(L)[None, :]
     n = max(int((weights != 0).sum()), 1)
+    inv_n = 1.0 / n
 
-    ce = -(weights * logp[idx_b, idx_l, targets]).sum() / n
+    ce = -(weights * logp[idx_b, idx_l, targets]).sum() * inv_n
 
     H = -(probs * logp).sum(axis=-1)  # [B, L]
     masked = (weights != 0)
-    ent_term = -(H * masked).sum() / n
+    ent_term = -(H * masked).sum() * inv_n
 
     loss = ce + beta * ent_term  # 最小化 -H 即最大化熵
 
-    dlogits = (probs - onehot(targets, V)) * (weights / n)[..., None]
-    ent_grad = probs * (logp + H[..., None])
-    dlogits += beta * ent_grad * masked[..., None] / n
+    # dlogits = (probs - onehot(targets)) * scale, 但不再真的构造 onehot
+    # (省下 [B, L, V] 的分配与拷贝, 只在目标位置减一次)
+    scale = weights * inv_n
+    dlogits = probs * scale[..., None]
+    dlogits[idx_b, idx_l, targets] -= scale
+    if beta != 0.0:
+        ent_grad = probs * (logp + H[..., None])
+        ent_grad *= masked[..., None]
+        dlogits += (beta * inv_n) * ent_grad
 
     if ref_logits is not None and kl_beta > 0.0:
-        ref_probs = softmax(ref_logits, axis=-1)
-        logq = np.log(np.clip(ref_probs, 1e-12, 1.0))
+        logq = log_softmax(ref_logits, axis=-1)
         r = logp - logq  # 逐 token 的 log 比
         kl = (probs * r).sum(axis=-1)  # [B, L]
-        loss += kl_beta * (kl * masked).sum() / n
+        loss += kl_beta * (kl * masked).sum() * inv_n
         dkl_dz = probs * (r - (probs * r).sum(axis=-1, keepdims=True))
-        dlogits += kl_beta * dkl_dz * masked[..., None] / n
+        dkl_dz *= masked[..., None]
+        dlogits += (kl_beta * inv_n) * dkl_dz
     return float(loss), dlogits
 
 
@@ -764,10 +951,11 @@ def evaluate(model: TinyTransformer, tokenizer: CharTokenizer,
     lengths = []
     for _ in range(n):
         prompt, answer = make_prompt(rng, args.task)
+        prompt_ids = tokenizer.encode(prompt)
         seqs, _ = model.generate_batch(
-            tokenizer.encode(prompt), 1, args.max_new, 0.0,
+            prompt_ids, 1, args.max_new, 0.0,
             rng, tokenizer.eos_id, args.max_pos)
-        resp = seqs[0][len(tokenizer.encode(prompt)):]
+        resp = seqs[0][len(prompt_ids):]
         ans_ids = [t for t in resp if t != tokenizer.eos_id]
         ans = tokenizer.decode(ans_ids)
         correct += int(ans == answer)
@@ -784,10 +972,11 @@ def show_examples(model: TinyTransformer, tokenizer: CharTokenizer,
     print("示例 (prompt -> 输出):")
     for _ in range(n):
         prompt, answer = make_prompt(rng, args.task)
+        prompt_ids = tokenizer.encode(prompt)
         seqs, _ = model.generate_batch(
-            tokenizer.encode(prompt), 1, args.max_new, 0.0,
+            prompt_ids, 1, args.max_new, 0.0,
             rng, tokenizer.eos_id, args.max_pos)
-        resp = seqs[0][len(tokenizer.encode(prompt)):]
+        resp = seqs[0][len(prompt_ids):]
         ans_ids = [t for t in resp if t != tokenizer.eos_id]
         ans = tokenizer.decode(ans_ids)
         mark = "✓" if ans == answer else "✗"
@@ -816,10 +1005,26 @@ def tokenizer_from_config(cfg: dict | None) -> CharTokenizer:
 
 def save_checkpoint(model: TinyTransformer, tokenizer: CharTokenizer,
                     args: argparse.Namespace, out_dir: str) -> None:
+    """保存 checkpoint。
+
+    用 ``savez_compressed``: 参数量不变但磁盘占用更小 (降本), 且顺带把
+    ``d_mlp`` / ``dtype`` 写进 config, 结构化剪枝后的窄 MLP 模型也能原样恢复。
+    """
     os.makedirs(out_dir, exist_ok=True)
-    np.savez(os.path.join(out_dir, "model.npz"), **model.params)
+    np.savez_compressed(os.path.join(out_dir, "model.npz"), **model.params)
     cfg = dict(vars(args))
-    cfg["vocab"] = list(tokenizer.chars)
+    # 模型结构以模型自身为准记录 (调用方传的 args 未必齐全, 剪枝后的窄
+    # attn_dim / d_mlp 必须原样落盘, 否则恢复时形状对不上)。
+    cfg.update({
+        "vocab": list(tokenizer.chars),
+        "d_model": model.d_model,
+        "n_layers": model.n_layers,
+        "n_heads": model.n_heads,
+        "max_pos": model.max_pos,
+        "d_mlp": model.d_mlp,
+        "attn_dim": model.attn_dim,
+        "dtype": model.dtype.name,
+    })
     with open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
@@ -829,19 +1034,41 @@ def load_checkpoint(model: TinyTransformer, tokenizer: CharTokenizer,
     """把 checkpoint 参数载入 model。
 
     若 checkpoint 词表比当前模型小 (例如恢复后追加了中文词表), 则只拷贝
-    共有的前缀, 新增部分保持当前值 (零初始化)。
+    共有的前缀, 新增部分保持当前值 (零初始化); dtype 与当前模型不一致时
+    按模型 dtype 转换 (float32/float64 两种存档可互通)。
     """
     data = np.load(os.path.join(out_dir, "model.npz"))
     for k in model.params:
         if k not in data:
             continue
         d = data[k]
+        dt = model.params[k].dtype
         if d.shape == model.params[k].shape:
-            model.params[k] = d
+            model.params[k] = d.astype(dt, copy=False)
         elif d.ndim == model.params[k].ndim and all(
                 ds <= ms for ds, ms in zip(d.shape, model.params[k].shape)):
             sl = tuple(slice(0, ds) for ds in d.shape)
-            model.params[k][sl] = d
+            model.params[k][sl] = d.astype(dt, copy=False)
+
+
+MODEL_KEYS = ("d_model", "n_layers", "n_heads", "max_pos", "d_mlp",
+              "attn_dim", "dtype")
+
+
+def model_from_config(tokenizer: CharTokenizer, cfg: dict | None,
+                      fallback: dict | None = None,
+                      seed: int = 0) -> TinyTransformer:
+    """按 config.json 重建模型。
+
+    兼容旧 checkpoint (没有 ``d_mlp`` / ``dtype`` 时退回 4×d_model 与
+    float64), 也让剪枝工具产出的窄 MLP / 窄注意力 checkpoint 能被各个入口直接加载。
+    """
+    kw: dict = dict(fallback or {})
+    if cfg:
+        for k in MODEL_KEYS:
+            if cfg.get(k) is not None:
+                kw[k] = cfg[k]
+    return TinyTransformer(tokenizer.vocab_size, seed=seed, **kw)
 
 
 # ---------------------------------------------------------------------------
