@@ -228,7 +228,9 @@ def main() -> None:
     ev = evaluate(model, tokenizer, np.random.default_rng(0), step_args,
                   n=args.eval_n)
     rng = np.random.default_rng(7)
-    samples = {p: generate_text(model, tokenizer, p, 32, 0.8, rng) for p in SAMPLES}
+    # 词表由语料池决定, 语料不够全时样例 prompt 里的字可能不在词表里 -> 跳过
+    samples = {p: generate_text(model, tokenizer, p, 32, 0.8, rng)
+               for p in SAMPLES if all(c in tokenizer.stoi for c in p)}
 
     out_dir = Path(args.out_dir)
     if not out_dir.is_absolute():
