@@ -1,0 +1,103 @@
+{"prompt": "你好", "response": "", "expected": null, "score": null, "ts": 1787732472.502807}
+{"prompt": "你好", "response": "", "expected": null, "score": null, "ts": 1787732474.0890346}
+{"prompt": "1+2", "response": "", "expected": null, "score": null, "ts": 1787732476.5220876}
+{"prompt": "1+2", "response": "", "expected": null, "score": null, "ts": 1787732477.9097946}
+{"prompt": "1+2", "response": "", "expected": null, "score": null, "ts": 1787732479.248953}
+{"prompt": "1+2", "response": "", "expected": null, "score": null, "ts": 1787732480.4120264}
+{"prompt": "1+2", "response": "", "expected": null, "score": null, "ts": 1787732481.5953178}
+{"prompt": "1+2", "response": "", "expected": null, "score": null, "ts": 1787732482.561349}
+{"prompt": "1+2", "response": "", "expected": null, "score": null, "ts": 1787732483.6143706}
+{"prompt": "2*5", "response": "240", "expected": null, "score": null, "ts": 1787732522.2987273}
+{"prompt": "2*5", "response": "25", "expected": null, "score": null, "ts": 1787732524.9776437}
+{"prompt": "2*5", "response": "24", "expected": null, "score": null, "ts": 1787732527.7602236}
+{"prompt": "2*5", "response": "23", "expected": null, "score": null, "ts": 1787732529.905984}
+{"prompt": "2*5", "response": "18", "expected": null, "score": null, "ts": 1787732531.8661716}
+{"prompt": "2*5", "response": "24", "expected": null, "score": null, "ts": 1787732533.5024474}
+{"prompt": "你好", "response": "", "expected": null, "score": null, "ts": 1787732637.5653882}
+{"prompt": "1*2", "response": "12", "expected": "2", "score": null, "ts": 1787732642.3575182}
+{"prompt": "1*2", "response": "2", "expected": null, "score": null, "ts": 1787732651.168131}
+{"prompt": "1*2", "response": "22", "expected": "2", "score": null, "ts": 1787732652.1755025}
+{"prompt": "1*2", "response": "", "expected": null, "score": null, "ts": 1787732655.548611}
+{"prompt": "1*2", "response": "", "expected": "2", "score": null, "ts": 1787732657.2214408}
+{"prompt": "1*2", "response": "2", "expected": null, "score": null, "ts": 1787732661.0815725}
+{"prompt": "1*2", "response": "2", "expected": null, "score": null, "ts": 1787732662.5782077}
+{"prompt": "1*2", "response": "", "expected": null, "score": null, "ts": 1787732663.9920487}
+{"prompt": "1*2", "response": "", "expected": null, "score": null, "ts": 1787732665.6335783}
+{"prompt": "1*2", "response": "", "expected": "2", "score": null, "ts": 1787732667.4131703}
+{"prompt": "1*2", "response": "2", "expected": null, "score": null, "ts": 1787732670.4165545}
+{"prompt": "1*2*3", "response": "", "expected": "6", "score": null, "ts": 1787732674.7304702}
+{"prompt": "1*2*3", "response": "6", "expected": null, "score": null, "ts": 1787732678.686103}
+{"prompt": "1*2*3*4", "response": "222", "expected": "12", "score": null, "ts": 1787732681.875464}
+{"prompt": "1*2*3*4", "response": "22222222222", "expected": "12", "score": null, "ts": 1787732687.2850308}
+{"prompt": "1*2*3*4", "response": "2", "expected": "24", "score": null, "ts": 1787732692.4885082}
+{"prompt": "1*2*3*4", "response": "26262422", "expected": null, "score": null, "ts": 1787732699.37504}
+{"prompt": "1*2*3*4", "response": "26242426224224242", "expected": "24", "score": null, "ts": 1787732701.9867015}
+{"prompt": "你好", "response": "呀，很高兴见到你\n温度1，今天星期几？", "expected": null, "score": null, "ts": 1787736626.84038}
+{"prompt": "1+2等于多少", "response": "吃多穿点衣服。a传e，刚刚看完一个字符串可的平一个块。\n2886提def fis_prins(n", "expected": null, "score": null, "ts": 1787736641.5361476}
+{"prompt": "1+2=()", "response": "", "expected": null, "score": null, "ts": 1787736654.181908}
+{"prompt": "1+2", "response": "07", "expected": null, "score": null, "ts": 1787736657.8018734}
+{"prompt": "1+2", "response": "=3", "expected": null, "score": null, "ts": 1787736659.157719}
+{"prompt": "1+2", "response": "=3", "expected": null, "score": null, "ts": 1787736660.1184118}
+{"prompt": "1+2", "response": "", "expected": null, "score": null, "ts": 1787736661.4546268}
+{"prompt": "1+2", "response": "=3", "expected": null, "score": null, "ts": 1787736663.462726}
+{"prompt": "1+3", "response": "=4", "expected": null, "score": null, "ts": 1787736665.7965589}
+{"prompt": "1+15", "response": "", "expected": null, "score": null, "ts": 1787736668.0776699}
+{"prompt": "1+15", "response": "", "expected": null, "score": null, "ts": 1787736672.643928}
+{"prompt": "1+15", "response": "", "expected": null, "score": null, "ts": 1787736674.673523}
+{"prompt": "你好", "response": "，刚写光2]。\n2-1=1", "expected": null, "score": null, "ts": 1787736676.8337126}
+{"prompt": "你好", "response": "呀，很高兴见到你\n6+121212=29", "expected": null, "score": null, "ts": 1787736678.354629}
+{"prompt": "你阿訇", "response": "今天天气怎么样？\n小诺: 今天晴空万里，适合出门走走走。\n5949\n2+210=5925\n71奖", "expected": null, "score": null, "ts": 1787736679.3544269}
+{"prompt": "你好", "response": "意思。\n65*22412=8224440\n2+5=92\n53+14=6\n50+0=40\n7+2+", "expected": null, "score": null, "ts": 1787736680.4095337}
+{"prompt": "你好", "response": "呀，很高兴见到你\n极限描述函数在某个点附近的变化趋势。\n熵文件试查煮了番茄鸡蛋面，很好吃。\n极限", "expected": null, "score": null, "ts": 1787736681.3868475}
+{"prompt": "你好", "response": "，你。\nREINFORLU 处理说直角", "expected": null, "score": null, "ts": 1787736686.540916}
+{"prompt": "你好", "response": "呀，很高兴见到你\n温度1，今天星期几？", "expected": null, "score": null, "ts": 1787738649.1413202}
+{"prompt": "好", "response": "，今天辛苦了。\n2-0=0", "expected": null, "score": null, "ts": 1787738654.798795}
+{"prompt": "好", "response": "的，回头聊！我的可以帮助模型通导可1情向量是有大问题目标。\n1+0=1", "expected": null, "score": null, "ts": 1787738655.8927803}
+{"prompt": "好", "response": "签，反复复执行同一段代码，知数据，阳", "expected": null, "score": null, "ts": 1787738656.669132}
+{"prompt": "好", "response": "呀，今天过肉溯和除。\n3+92=113912，请把多会从不会直接加号拼接，也可以用 formpy", "expected": null, "score": null, "ts": 1787738657.455141}
+{"prompt": "好", "response": "微调。", "expected": null, "score": null, "ts": 1787738658.794097}
+{"prompt": "好", "response": "！我叫小诺，是你的助手。\n6+8=148\n6*2444=16", "expected": null, "score": null, "ts": 1787738659.6663437}
+{"prompt": "好", "response": "吃，按需使用。", "expected": null, "score": null, "ts": 1787738660.2996883}
+{"prompt": "好", "response": "，训练6饭了吗？", "expected": null, "score": null, "ts": 1787738661.2881355}
+{"prompt": "好", "response": "，刚刚看完个教程，收获很大。\n5-2=3", "expected": null, "score": null, "ts": 1787738662.0281847}
+{"prompt": "好", "response": "的，回头聊！我叫小红3。\n86+24674=10208\n集合用花括号表示，里面的元素不会重复，可", "expected": null, "score": null, "ts": 1787738662.907959}
+{"prompt": "好", "response": "呀，很高兴见到你。\n1+2+2=4", "expected": null, "score": null, "ts": 1787738663.6248856}
+{"prompt": "好", "response": "的煮了番茄鸡蛋面，很好吃。\n4+3=70\n极限描述函数在某个点附近的变化趋势。\n你的爱好是什么？", "expected": null, "score": null, "ts": 1787738664.4742608}
+{"prompt": "好", "response": "吃，回头聊！\n4446-30=4", "expected": null, "score": null, "ts": 1787738665.176318}
+{"prompt": "好", "response": "呀，很高兴见到你\n6+24+952=14", "expected": null, "score": null, "ts": 1787738665.908172}
+{"prompt": "好", "response": "，你。\n2+2=4", "expected": null, "score": null, "ts": 1787738666.6265159}
+{"prompt": "好", "response": "呀，很高兴见到你。\n温度编程最重要的能力是拆解问题和持续学习。\n6+24=62\n别客气，随时找我", "expected": null, "score": null, "ts": 1787738667.362981}
+{"prompt": "好", "response": "，刚看完个教程，收获很大。\n5-2=3", "expected": null, "score": null, "ts": 1787738668.0274177}
+{"prompt": "好", "response": "，请问有问有什么可以帮你的爱好是什么？\n14+92=10", "expected": null, "score": null, "ts": 1787738668.6993556}
+{"prompt": "好", "response": "，你会做讨厌两件做红烧肉。", "expected": null, "score": null, "ts": 1787738669.458499}
+{"prompt": "12+12=", "response": "3", "expected": null, "score": null, "ts": 1787738675.9246593}
+{"prompt": "12+12=", "response": "3", "expected": null, "score": null, "ts": 1787738677.585896}
+{"prompt": "12+12=", "response": "3", "expected": "24", "score": null, "ts": 1787738678.896982}
+{"prompt": "12+12=", "response": "这个我还没学会，试试用 !c 教我正确答案。", "expected": null, "score": null, "ts": 1787738683.7810407}
+{"prompt": "12+12=", "response": "这个我还没学会，试试用 !c 教我正确答案。", "expected": "24", "score": null, "ts": 1787738685.477007}
+{"prompt": "12+12=", "response": "24444\n6+10+0=420\n6+0=6\n晚上打算做红烧肉。\n6-0=6", "expected": null, "score": null, "ts": 1787738690.6175578}
+{"prompt": "12+12=", "response": "24444\n6+10+0=420\n6+0=6\n晚上打算做红烧肉。\n6-0=6", "expected": null, "score": null, "ts": 1787738692.1535249}
+{"prompt": "12+12=", "response": "24444\n6+10+0=420\n6+0=6\n晚上打算做红烧肉。\n6-0=6", "expected": null, "score": null, "ts": 1787738693.7654254}
+{"prompt": "你好", "response": "呀，很高兴见到你\n温度1，今天星期几？", "expected": null, "score": null, "ts": 1787746987.8273983}
+{"prompt": "你好", "response": "，很高兴见到你\n极限描述函数在某个点附近的变化趋势。\n6+6=12", "expected": null, "score": null, "ts": 1787746989.3437803}
+{"prompt": "你好", "response": "呀，很高兴见到你。\nTrans = [3, 5])\n50+20=5", "expected": null, "score": null, "ts": 1787746991.3066747}
+{"prompt": "limit", "response": "提交到版本库。\n无监督学习没说一个缩进级别的语句属于同一个块。\n7+14=平方就是一个缩问个合", "expected": null, "score": null, "ts": 1787746993.0761406}
+{"prompt": "limit", "response": "提交到版本库。\n无监督学习没说一定的工具记智的多候的每个节点指标签，面，让模型自己发现数时。", "expected": null, "score": null, "ts": 1787746994.3777876}
+{"prompt": "limit", "response": "=16\n0+2+2=80", "expected": null, "score": null, "ts": 1787746995.345088}
+{"prompt": "limit", "response": "提交到版本库。\n无监督学习没说一个缩进级别的语句属于同一个块。\n71=73103\n5-3+个缩", "expected": null, "score": null, "ts": 1787746996.8792186}
+{"prompt": "limit", "response": "提交到版本库。\n无监督学习没说一个缩进级别的个缩进里去掉一部分，例如 2 为底 8 的个、L", "expected": null, "score": null, "ts": 1787746998.3717}
+{"prompt": "limit", "response": "提交到版本库。\n无监督学习没说一个缩进级别的语句属于同一个块。\npython3 脚本自都机吗c", "expected": null, "score": null, "ts": 1787746999.5026832}
+{"prompt": "limit", "response": "提交到版本库。\n无监督学习没说一个缩进级别的语句属于同一个块。\npython3 scr4。\n9", "expected": null, "score": null, "ts": 1787747001.3212829}
+{"prompt": "limit", "response": "提交到版本库。\n无监督学习没多看S是模型层从一个缩类复和表示代码块和包让代码可以复用，线任L", "expected": null, "score": null, "ts": 1787747002.3218563}
+{"prompt": "limit", "response": "提交到版本库。\n无监督学习没说一个缩进级别的语句属于同一个块。\n2+2=4", "expected": null, "score": null, "ts": 1787747003.4967268}
+{"prompt": "hello", "response": "ad(30))\n3+7=10", "expected": null, "score": null, "ts": 1787747005.9556851}
+{"prompt": "hello", "response": "ard(3))\n3+7=10", "expected": null, "score": null, "ts": 1787747007.4713838}
+{"prompt": "hello", "response": "ase1, 101))\n7+2=90\n1+2=93\n5+14=5", "expected": null, "score": null, "ts": 1787747008.9072506}
+{"prompt": "hello", "response": "ad(30))\n3+7=10", "expected": null, "score": null, "ts": 1787747010.3142543}
+{"prompt": "hello", "response": "ldef f f fis_prime(n):\n    if n 2 正则把参数压向零。\n2叫(", "expected": "hello", "score": null, "ts": 1787747012.059529}
+{"prompt": "hello", "response": "ard(f)\n    if is_prime(x)])\n奖励设计直接决定强化学习学到的行为和or", "expected": null, "score": null, "ts": 1787747015.931914}
+{"prompt": "hello", "response": "ar():\n     if= 1", "expected": null, "score": null, "ts": 1787747018.8600428}
+{"prompt": "hello", "response": "arl() 1)\n  result = sum(range(1, 101))\nprintsuyp", "expected": null, "score": null, "ts": 1787747019.9471064}
+{"prompt": "helolo", "response": "grleen=\", 0.01))\nprint(len(words)\n7-2=5", "expected": null, "score": null, "ts": 1787747021.4009202}
+{"prompt": "hello", "response": "ard(30))\n 1))\n2+2=4", "expected": null, "score": null, "ts": 1787747022.4749877}
+{"prompt": "hello", "response": "a00=00", "expected": null, "score": null, "ts": 1787747023.4014025}

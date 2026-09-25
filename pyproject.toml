@@ -1,0 +1,32 @@
+[project]
+name = "enochmodel1"
+version = "0.1.0"
+description = "纯 NumPy 的字符级微型 Transformer: 预训练 + speed×score 强化学习 + 日常对话"
+readme = "README.md"
+authors = [
+    { name = "Enoch-199811", email = "LinEnoch@outlook.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0",
+]
+
+[project.scripts]
+enochmodel1 = "enochmodel1.main:main"
+enoch-train = "enochmodel1.main:main"
+enoch-pretrain = "enochmodel1.pretrain:main"
+enoch-chat = "enochmodel1.chat:main"
+enoch-build-corpus = "enochmodel1.build_corpus:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+]
