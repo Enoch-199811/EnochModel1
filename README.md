@@ -50,7 +50,8 @@ runner 上, 不占本机 (公开仓库的 standard runner 不计费, 单 job 上
 
 | 环节 | 做法 |
 | --- | --- |
-| 触发 | Actions → **train** → Run workflow (可选配置 / 分钟数 / worker 数 / 语料配比) |
+| 触发 | Actions → **train** → Run workflow (可选配置 / 分钟数 / worker 数 / 语料配比 / 副本数) |
+| 放大算力 | `replicas=N`：同配置开 N 个独立 runner（同初值、不同数据顺序），结束后自动权重平均并与单副本择优 |
 | 并行 | 每个模型配置一个 job; job 内部再用 `tools/parallel_pretrain.py` 开 N 路**多进程数据并行**(纯 NumPy 单线程最快, 见优化文档), 每 `sync_steps` 步 barrier 同步并平均权重 |
 | 语料 | runner 上现造: `enoch-build-corpus` 按 **对话优先** 配比生成 → `enoch-pool` 按 manifest 偏移拼 token 池 (对话 24M / 数学 12M / 代码 4M) |
 | 产物 | 每个 job 上传 checkpoint + `train_report.json`; publish job 汇总对比表 (验证困惑度 / 算术准确率 / tok/s), 并把**最佳模型**归档到 `ci-checkpoints` 分支 |

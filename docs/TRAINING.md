@@ -46,6 +46,7 @@ gh workflow run train.yml -f config=d128-L3-ctx192 -f minutes=330 -f workers=1 \
 | `workers` | 1 | **保持 1**：多进程会被配额节流 |
 | `sync_steps` | 25 | 每轮平均权重的步数（单进程时只是计时粒度） |
 | `data_seed` | 1234 | 同配置多 job 时用不同值：数据顺序不同、模型初值相同 |
+| `replicas` | 1 | 同配置开几个副本（job）；>1 时 publish 自动做权重平均并择优归档 |
 | `dialogue/math/code/chinese_chars` | 24M/12M/4M/0 | 语料配比；`chinese>0` 才会下载维基 |
 
 产物：每个 job 上传 `ckpt-<config>`（checkpoint + `train_report.json`）；
@@ -72,7 +73,7 @@ token 就在数据量上"够了"；**瓶颈因此在容量与数据质量**，�
 | --- | --- | --- |
 | S1 选型 | `config=all`、`workers=1`、330 分钟：4 档同数据同预算横向对比 | ✔ 已派发 |
 | S2 真实中文 | `chinese_chars=8M~12M` 把维基正文混进池子（合成对话是模板化的，真实中文提升语感） | ✔ 已接入并派发验证 |
-| S3 跨 job 数据并行 | 同 `config` 开 N 个 job、不同 `data_seed`（同初值），结束后平均权重（`tools/average_checkpoints.py`）+ 各自评估取最优 | ✔ **实测有效** |
+| S3 跨 job 数据并行 | `replicas=N` 输入：同一 config 开 N 个 job（独立 runner、同初值、不同 `data_seed`），publish 阶段自动 `merge_replicas.py` 平均并逐项评估，`collect_ci_reports.py` 在「各副本 vs 平均」里择优归档 | ✔ 已自动化并端到端验证 |
 | S4 压缩落盘 | 用 `enoch-prune` 做结构化剪枝（MLP 隐藏单元 + 注意力头），`eval_compare` 同尺评估 | ⏳ 待做 |
 
 ### S3 实测（d128，两个 job 各 3 分钟、同初值、不同 data_seed）
