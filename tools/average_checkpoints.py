@@ -88,6 +88,9 @@ def main() -> None:
     ids, pool_tok = load_pool(args.pool)
     val_chars = min(args.val_chars, ids.size // 10)
     val_ids = ids[-val_chars:]
+    # 池子词表与模型词表可能不同 (CI 上现造的语料池), 所以先解码回文本,
+    # 再用每个模型自己的词表重新编码 —— 否则 token id 越界/错位。
+    val_text = "".join(pool_tok.itos[int(i)] for i in val_ids)
 
     loaded = []
     rows = []
@@ -97,15 +100,19 @@ def main() -> None:
             ckpt = PROJECT_ROOT / ckpt
         model, tokenizer, _cfg = load_model(ckpt)
         loaded.append(model)
-        rows.append({"name": ckpt.name, "model": model, "checkpoint": str(ckpt)})
+        rows.append({"name": ckpt.name, "model": model, "tokenizer": tokenizer,
+                     "checkpoint": str(ckpt)})
 
     averaged = average_models(loaded)
-    rows.append({"name": "average", "model": averaged, "checkpoint": "(内存)"})
+    rows.append({"name": "average", "model": averaged,
+                 "tokenizer": rows[0]["tokenizer"], "checkpoint": "(内存)"})
 
     for row in rows:
         model = row["model"]
-        ppl = val_perplexity(model, pool_tok, val_ids,
-                             min(128, model.max_pos), 8)
+        tok = row.get("tokenizer", pool_tok)
+        usable = "".join(c for c in val_text if c in tok.stoi)
+        ids_m = np.array([tok.stoi[c] for c in usable], dtype=np.int32)
+        ppl = val_perplexity(model, tok, ids_m, min(128, model.max_pos), 8)
         ev_args = argparse.Namespace(task="easy", max_new=args.max_new,
                                      max_pos=model.max_pos, score_mode="partial")
         ev = evaluate(model, pool_tok, np.random.default_rng(0), ev_args,
